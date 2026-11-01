@@ -48,7 +48,7 @@ The exact Checkout.com client SDK and session/tokenization flow depend on the ch
 ## Development Roadmap
 
 ### Phase 1: Python Backend & Provider Integration
-- [ ] M1: Sandbox configuration, credentials validation, and HTTPX client
+- [x] M1: Sandbox configuration, credentials validation, and HTTPX client
 - [ ] M2: Create and retrieve payments; validate amount/currency
 - [ ] M3: Authorization-only, capture, void, and refunds (where supported)
 - [ ] M4: Idempotency, safe retries, and timeout reconciliation
@@ -69,7 +69,11 @@ The exact Checkout.com client SDK and session/tokenization flow depend on the ch
 
 Milestones are checked off only when code, tests, and documentation are complete.
 
-### Current Progress — M1 In Progress
+### M1 Complete — Configuration and HTTPX Client
+
+M1 covers local configuration validation, authentication header construction,
+explicit timeouts, and propagation of HTTP errors to the caller. Credential
+validation here means local format checks, not verification of live Sandbox keys.
 
 - [x] Load the secret key and base URL from environment variables.
 - [x] Raise a clear error when either required setting is missing.
@@ -86,14 +90,18 @@ Milestones are checked off only when code, tests, and documentation are complete
   500, 502, 503, and 504), preserving the response without automatic retries.
 - [x] Test that token creation propagates HTTP errors (401, 403, 422, 429,
   500, 502, 503, and 504), preserving the response without automatic retries.
-- [ ] Add application-level decisions for authentication errors, rate limits,
-  and uncertain payment outcomes; the client currently propagates errors only.
 - [x] Review Bearer key formats and the unique Sandbox base URL against official documentation.
 - [x] Reject secret keys without the Sandbox `sk_sbox_` prefix (format guard only).
 - [x] Validate the Sandbox HTTPS hostname and reject credentials, explicit ports,
   extra paths, queries, and fragments. Accept and normalize a trailing slash.
-- [ ] Resolve the tokenization architecture: the Python card-token method is a
-  learning exercise, not the intended merchant backend card-entry flow.
+
+### Follow-up Work — M2, M4, and M7
+
+- [ ] M2/M7: Choose the supported client-side tokenization/payment-session flow.
+  The Python card-token method remains a learning exercise.
+- [ ] M2: Add application-level decisions for authentication and permission errors.
+- [ ] M4: Handle rate limits, safe retries, and uncertain payment outcomes.
+  The client currently propagates errors without automatically retrying.
 
 > **Tokenization — learning use only:** Token creation requires a Public Key,
 > and direct requests with `type: "card"` are for testing only. The Python
