@@ -45,6 +45,18 @@ class CheckoutClient:
         self.base_url = self.base_url.rstrip("/")
         
         
+    def validate_token_config(self):
+        public_key = os.getenv("CHECKOUT_PUBLIC_KEY")
+        if not public_key or not public_key.startswith("pk_sbox_"):
+            raise ValueError("CHECKOUT_PUBLIC_KEY is missing or invalid")
+        return public_key
+
+    def validate_payment_config(self):
+        if not self.processing_channel_id or re.fullmatch(
+            r"pc_[A-Za-z0-9_]{26}", self.processing_channel_id
+        ) is None:
+            raise ValueError("CHECKOUT_PROCESSING_CHANNEL_ID is missing or invalid")
+
     def get_payment(self, payment_id: str):
         url = f"{self.base_url}/payments/{payment_id}"
         headers = {
@@ -65,10 +77,7 @@ class CheckoutClient:
         if type(order_id) is not str or not order_id.strip() or len(order_id) > 80:
             raise ValueError("order_id must be a nonblank string of at most 80 characters")
 
-        if not self.processing_channel_id or re.fullmatch(
-            r"pc_[A-Za-z0-9_]{26}", self.processing_channel_id
-        ) is None:
-            raise ValueError("CHECKOUT_PROCESSING_CHANNEL_ID is missing or invalid")
+        self.validate_payment_config()
         
         url = f"{self.base_url.rstrip('/')}/payments"
 
@@ -99,10 +108,7 @@ class CheckoutClient:
         return response
     
     def create_token(self, card: dict):
-        public_key = os.getenv("CHECKOUT_PUBLIC_KEY")
-
-        if not public_key or not public_key.startswith("pk_sbox_"):
-            raise ValueError("CHECKOUT_PUBLIC_KEY is missing or invalid")
+        public_key = self.validate_token_config()
 
         url = f"{self.base_url.rstrip('/')}/tokens"
 

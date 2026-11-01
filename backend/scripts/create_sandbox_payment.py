@@ -6,7 +6,6 @@ Test card source: https://api-reference.checkout.com/tag/tokens
 """
 
 from datetime import datetime, timezone
-import os
 from pathlib import Path
 import re
 import sys
@@ -52,13 +51,8 @@ def main():
     
     try:
         client = CheckoutClient()
-        public_key = os.getenv("CHECKOUT_PUBLIC_KEY")
-        if not public_key or not public_key.startswith("pk_sbox_"):
-            raise ValueError
-        if not client.processing_channel_id or re.fullmatch(
-            r"pc_[A-Za-z0-9_]{26}", client.processing_channel_id
-        ) is None:
-            raise ValueError
+        client.validate_token_config()
+        client.validate_payment_config()
     except ValueError:
         print("Invalid Sandbox URL, key format, or processing channel ID. No request sent.")
         return 1
