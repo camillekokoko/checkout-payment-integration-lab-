@@ -3,7 +3,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from app.checkout_client import CheckoutClient
+from app.clients.checkout_client import CheckoutClient
 
 
 @pytest.fixture(autouse=True)
@@ -21,7 +21,7 @@ def test_create_payment_rejects_invalid_processing_channel(monkeypatch, channel_
         monkeypatch.setenv("CHECKOUT_PROCESSING_CHANNEL_ID", channel_id)
 
     client = CheckoutClient()
-    with patch("app.checkout_client.httpx.post") as mock_post:
+    with patch("app.clients.checkout_client.httpx.post") as mock_post:
         with pytest.raises(ValueError, match="CHECKOUT_PROCESSING_CHANNEL_ID is missing or invalid"):
             client.create_payment(
                 amount=1000, currency="AUD", token="tok_test_fake", order_id="order_1001"
@@ -36,7 +36,7 @@ def test_create_payment_rejects_unsupported_currency(monkeypatch, currency):
 
     client = CheckoutClient()
 
-    with patch("app.checkout_client.httpx.post") as mock_post:
+    with patch("app.clients.checkout_client.httpx.post") as mock_post:
         with pytest.raises(ValueError, match="currency must be AUD"):
             client.create_payment(amount=1000, currency=currency, token="tok_test_fake", order_id="order_1001")
 
@@ -54,7 +54,7 @@ def test_create_payment_sends_aud_amount_in_minor_units(monkeypatch):
         request=httpx.Request("POST", "https://test.api.sandbox.checkout.com/payments"),
     )
 
-    with patch("app.checkout_client.httpx.post", return_value=provider_response) as mock_post:
+    with patch("app.clients.checkout_client.httpx.post", return_value=provider_response) as mock_post:
         response = client.create_payment(amount=1000, currency="AUD", token="tok_test_fake", order_id="order_1001")
 
         mock_post.assert_called_once()
@@ -72,7 +72,7 @@ def test_create_payment_rejects_invalid_order_id(monkeypatch, order_id):
 
     client = CheckoutClient()
 
-    with patch("app.checkout_client.httpx.post") as mock_post:
+    with patch("app.clients.checkout_client.httpx.post") as mock_post:
         with pytest.raises(
             ValueError, match="order_id must be a nonblank string of at most 80 characters"
         ):
@@ -95,7 +95,7 @@ def test_create_payment_sends_order_id_as_reference(monkeypatch, order_id):
         request=httpx.Request("POST", "https://test.api.sandbox.checkout.com/payments"),
     )
 
-    with patch("app.checkout_client.httpx.post", return_value=provider_response) as mock_post:
+    with patch("app.clients.checkout_client.httpx.post", return_value=provider_response) as mock_post:
         client.create_payment(
             amount=1000, currency="AUD", token="tok_test_fake", order_id=order_id
         )
@@ -162,7 +162,7 @@ def test_create_payment_uses_secret_key(monkeypatch):
     client = CheckoutClient()
 
     # Payment creation must use the server-side secret key, not the public key.
-    with patch("app.checkout_client.httpx.post") as mock_post:
+    with patch("app.clients.checkout_client.httpx.post") as mock_post:
         mock_post.return_value = httpx.Response(
             201,
             json={"id": "pay_test_fake"},
@@ -191,7 +191,7 @@ def test_create_payment_propagates_http_error(monkeypatch, status_code):
 
     # Preserve the error response so the caller can inspect its status.
     # Do not retry here: a server error does not prove payment processing failed.
-    with patch("app.checkout_client.httpx.post", return_value=provider_response) as mock_post:
+    with patch("app.clients.checkout_client.httpx.post", return_value=provider_response) as mock_post:
         with pytest.raises(httpx.HTTPStatusError) as exc_info:
             client.create_payment(amount=1000, currency="AUD", token="tok_test_fake", order_id="order_1001")
 
@@ -213,7 +213,7 @@ def test_get_payment_uses_secret_key_and_returns_response(monkeypatch):
         request=httpx.Request("GET", url),
     )
 
-    with patch("app.checkout_client.httpx.get", return_value=provider_response) as mock_get:
+    with patch("app.clients.checkout_client.httpx.get", return_value=provider_response) as mock_get:
         response = client.get_payment("pay_test_fake")
 
         assert response is provider_response
@@ -236,7 +236,7 @@ def test_get_payment_propagates_http_error(monkeypatch, status_code):
     )
 
     # A failed lookup must not be interpreted as a failed payment.
-    with patch("app.checkout_client.httpx.get", return_value=provider_response) as mock_get:
+    with patch("app.clients.checkout_client.httpx.get", return_value=provider_response) as mock_get:
         with pytest.raises(httpx.HTTPStatusError) as exc_info:
             client.get_payment("pay_test_fake")
 
@@ -260,7 +260,7 @@ def test_create_token_rejects_blank_public_key(monkeypatch):
     
     client = CheckoutClient()
 
-    with patch("app.checkout_client.httpx.post") as mock_post:
+    with patch("app.clients.checkout_client.httpx.post") as mock_post:
         with pytest.raises(
             ValueError,
             match="CHECKOUT_PUBLIC_KEY is missing or invalid",
@@ -276,7 +276,7 @@ def test_create_token_rejects_invalid_public_key(monkeypatch):
     
     client = CheckoutClient()
     
-    with patch("app.checkout_client.httpx.post") as mock_post:
+    with patch("app.clients.checkout_client.httpx.post") as mock_post:
         with pytest.raises(
             ValueError,
             match="CHECKOUT_PUBLIC_KEY is missing or invalid",
@@ -293,7 +293,7 @@ def test_create_token_rejects_missing_public_key(monkeypatch):
     
     client = CheckoutClient()
         
-    with patch("app.checkout_client.httpx.post") as mock_post:
+    with patch("app.clients.checkout_client.httpx.post") as mock_post:
         with pytest.raises(
             ValueError,
             match="CHECKOUT_PUBLIC_KEY is missing or invalid",
@@ -309,7 +309,7 @@ def test_create_token_returns_response(monkeypatch):
     
     client = CheckoutClient()
     
-    with patch("app.checkout_client.httpx.post") as mock_post:
+    with patch("app.clients.checkout_client.httpx.post") as mock_post:
         mock_post.return_value = httpx.Response(
             status_code=201,
             json={"token": "tok_test_fake"},
@@ -361,7 +361,7 @@ def test_create_token_propagates_http_error(monkeypatch, status_code):
     )
 
     # Preserve HTTP errors for the caller without automatically retrying.
-    with patch("app.checkout_client.httpx.post", return_value=provider_response) as mock_post:
+    with patch("app.clients.checkout_client.httpx.post", return_value=provider_response) as mock_post:
         with pytest.raises(httpx.HTTPStatusError) as exc_info:
             client.create_token(card)
 
@@ -384,7 +384,7 @@ def test_create_token_propagates_timeout(monkeypatch):
         "cvv": "fake-cvv",
     }
     
-    with patch("app.checkout_client.httpx.post") as mock_post:
+    with patch("app.clients.checkout_client.httpx.post") as mock_post:
         mock_post.side_effect = httpx.ReadTimeout("Simulated timeout")
 
         with pytest.raises(httpx.ReadTimeout):
@@ -406,7 +406,7 @@ def test_create_payment_propagates_timeout(monkeypatch):
 
     client = CheckoutClient()
 
-    with patch("app.checkout_client.httpx.post") as mock_post:
+    with patch("app.clients.checkout_client.httpx.post") as mock_post:
         mock_post.side_effect = httpx.ReadTimeout("Simulated timeout")
 
         with pytest.raises(httpx.ReadTimeout):
@@ -422,7 +422,7 @@ def test_create_payment_rejects_invalid_amount(monkeypatch, amount):
 
     client = CheckoutClient()
 
-    with patch("app.checkout_client.httpx.post") as mock_post:
+    with patch("app.clients.checkout_client.httpx.post") as mock_post:
         with pytest.raises(
             ValueError, match="amount must be a positive integer in minor units"
         ):

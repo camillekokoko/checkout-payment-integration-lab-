@@ -44,7 +44,8 @@ def report_error_details(response):
 def main():
     # CheckoutClient loads .env at import without overriding existing environment values.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from app.checkout_client import CheckoutClient
+    from app.clients.checkout_client import CheckoutClient
+    from app.services.payment_service import classify_payment_error, payment_from_response
 
     print("Sandbox only: one AUD 10.00 payment request with capture=False.")
     print("Uses a fixed provider test card. No real card data is accepted.")
@@ -87,10 +88,12 @@ def main():
         if not isinstance(payment_id, str) or re.fullmatch(r"pay_[A-Za-z0-9_]{26}", payment_id) is None:
             raise ValueError
         print("Payment ID:", payment_id, flush=True)
+        payment = payment_from_response(order_id, payment_data)
         print("Provider status:", safe_status(payment_data))
+        print("Local status:", payment.status)
 
         stage = "payment lookup"
-        lookup_response = client.get_payment(payment_id)
+        lookup_response = client.get_payment(payment.payment_id)
         print("Payment lookup:")
         report_response(lookup_response)
         print("Provider status:", safe_status(lookup_response.json()))
@@ -100,8 +103,14 @@ def main():
         print("HTTP error during", stage)
         report_response(error.response)
         report_error_details(error.response)
-    except httpx.RequestError:
+        decision = classify_payment_error(error)
+        print("Error category:", decision.kind)
+        print("Next action:", decision.action)
+    except httpx.RequestError as error:
         print("Connection error or timeout during", stage)
+        decision = classify_payment_error(error)
+        print("Error category:", decision.kind)
+        print("Next action:", decision.action)
     except (ValueError, KeyError, TypeError):
         print("Unexpected response format during", stage)
 
@@ -115,6 +124,8 @@ def main():
 
 
 def safe_status(data):
+    if not isinstance(data, dict):
+        return "unavailable"
     status = data.get("status")
     if isinstance(status, str) and re.fullmatch(r"[A-Za-z ]{1,50}", status):
         return status

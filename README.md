@@ -49,7 +49,7 @@ The exact Checkout.com client SDK and session/tokenization flow depend on the ch
 
 ### Phase 1: Python Backend & Provider Integration
 - [x] M1: Sandbox configuration, credentials validation, and HTTPX client
-- [ ] M2: Create and retrieve payments; validate amount/currency
+- [x] M2: Sandbox payment creation/lookup, validation, in-memory records, and error decisions
 - [ ] M3: Authorization-only, capture, void, and refunds (where supported)
 - [ ] M4: Idempotency, safe retries, and timeout reconciliation
 - [ ] M5: Webhook signature verification, deduplication, and event processing
@@ -97,11 +97,12 @@ validation here means local format checks, not verification of live Sandbox keys
 - [x] Validate the Sandbox HTTPS hostname and reject credentials, explicit ports,
   extra paths, queries, and fragments. Accept and normalize a trailing slash.
 
-### Follow-up Work — M2, M4, and M7
+### Follow-up Work — M4, M6, and M7
 
-- [ ] M2/M7: Choose the supported client-side tokenization/payment-session flow.
-  The Python card-token method remains a learning exercise.
-- [ ] M2: Add application-level decisions for authentication and permission errors.
+- [x] M2: Choose Flow Payment Sessions for the website; implementation belongs
+  to M7. The Python card-token method remains a learning exercise.
+- [x] M2: Add application-level operator decisions for authentication and permission errors.
+- [ ] M6: Persist merchant order/payment associations in PostgreSQL.
 - [ ] M4: Handle rate limits, safe retries, and uncertain payment outcomes.
   The client currently propagates errors without automatically retrying.
 
@@ -123,7 +124,13 @@ The existing header formats match these formats, but this is not live credential
 verification. The merchant checkout must use a supported client-side component;
 the backend must not receive raw card details.
 
-### M2 In Progress — AUD Payment Creation and Lookup
+### M2 Complete — AUD Sandbox Payment Creation and Lookup
+
+Scope and walkthrough: [M2 Completion](docs/m2-completion.md). M2 covers the
+Python learning flow and in-memory records. Durable persistence belongs to M6;
+the Flow website integration belongs to M7. This does not complete all of FR-002.
+
+Visual reference: [M2 Cheat Sheet (JPG)](docs/assets/m2-cheat-sheet.jpg).
 
 - [x] Implement payment creation and lookup client methods.
 - [x] Validate positive integer amounts in minor units, rejecting booleans.
@@ -139,13 +146,20 @@ the backend must not receive raw card details.
 - [x] Accept a required merchant `order_id` and send it as the payment `reference`.
 - [x] Validate order IDs as nonblank strings of at most 80 characters; preserve
   accepted IDs unchanged, including any surrounding whitespace.
-- [ ] Persist the association between merchant orders and provider payment IDs.
-- [ ] Store local payment records and map provider payment states.
+- [x] Convert payment responses into in-memory `Payment` records linked to an
+  order and reject missing, blank, or incorrectly typed required response fields.
+- [x] Map `Pending`, `Authorized`, and `Declined` to local statuses. Unrecognized
+  statuses remain `unknown`; capture/refund state handling belongs to M3.
+- [x] Classify authentication, permission, validation, rate-limit, and uncertain
+  errors in the manual script, with operator guidance and no automatic retries.
+- [x] Test the script offline, including successful lookup, HTTP errors, timeout,
+  and an incomplete payment response without creating another payment.
+- [x] Select Flow Payment Sessions for the planned client-side checkout.
 
-M2 is not complete. Tokenization flow selection and application-level error
-decisions remain tracked in the follow-up work above.
+The script's records are not persisted. Safe retries/idempotency (M4), webhooks
+(M5), PostgreSQL (M6), and Flow UI/session endpoints (M7) remain unfinished.
 
-Latest verified offline test result: **87 passed**. This does not verify live
+Latest verified offline test result: **136 passed** (client, model, service, and script tests). This does not verify live
 Sandbox authentication or payment processing.
 
 ## Planned Repository Structure
@@ -159,7 +173,13 @@ checkout-payment-integration-lab/
 │   │   ├── services/
 │   │   ├── webhooks/
 │   │   └── models/
+│   ├── scripts/
+│   │   └── create_sandbox_payment.py  # Manual Sandbox learning flow
 │   └── tests/
+│       ├── clients/
+│       ├── models/
+│       ├── services/
+│       └── scripts/
 ├── frontend/
 │   └── src/
 │       ├── pages/
@@ -167,16 +187,16 @@ checkout-payment-integration-lab/
 │       │   └── Dashboard.tsx
 │       └── components/
 ├── docs/
-│   ├── architecture.md
-│   └── troubleshooting.md
 ├── README.md
 ├── REQUIREMENTS.md
 ├── .env.example
 └── docker-compose.yml
 ```
 
-**Note:** This is the target structure. The current client is in
-`backend/app/checkout_client.py`, and offline unit tests are in `backend/tests/`.
+**Note:** This is the target structure; some components are not implemented yet.
+The current client is in `backend/app/clients/checkout_client.py`.
+Manual execution belongs in `backend/scripts/`; reusable application code belongs
+in `backend/app/`, and offline unit tests are grouped under `backend/tests/`.
 
 ## Local Setup (Current Milestone)
 
@@ -230,13 +250,15 @@ From the project root, with the virtual environment activated:
 
 ```bash
 cd backend
-PYTHON_DOTENV_DISABLED=1 python -m pytest tests/test_checkout_client.py -q
+PYTHON_DOTENV_DISABLED=1 python -m pytest tests/clients tests/models tests/services tests/scripts -q
 ```
 
 These tests use fake configuration and mocked HTTP calls. The environment flag
-disables `.env` loading during this run. Run the specified test file: the existing
-`backend/test_connection.py` and `backend/test_token_config.py` are manual scripts
-and are not part of this offline test suite.
+disables `.env` loading during this run. Run the specified test directories:
+`backend/tests/test_connection.py` and `backend/tests/test_token_config.py` are
+legacy manual scripts and are not part of this offline test suite. They still
+need to be moved out of pytest discovery; the connection script also needs its
+client import updated before manual use.
 
 ## Security
 
