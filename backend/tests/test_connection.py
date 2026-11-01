@@ -1,4 +1,4 @@
-from app.checkout_client import CheckoutClient
+from backend.app.checkout_client import CheckoutClient
 
 client = CheckoutClient();
 response = client.get_payment("pay_test123")

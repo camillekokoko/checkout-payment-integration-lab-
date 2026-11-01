@@ -123,11 +123,23 @@ The existing header formats match these formats, but this is not live credential
 verification. The merchant checkout must use a supported client-side component;
 the backend must not receive raw card details.
 
-M2 work has started: payment creation and lookup methods exist, and positive
-integer amount validation is covered by tests. Currency validation, local payment
-records, and payment-state mapping remain incomplete. M2 is not complete.
+### M2 In Progress — AUD Payment Creation and Lookup
 
-Latest verified offline test result: **60 passed**. This does not verify live
+- [x] Implement payment creation and lookup client methods.
+- [x] Validate positive integer amounts in minor units, rejecting booleans.
+- [x] Accept only the exact currency string `AUD`; reject other currencies,
+  lowercase input, whitespace, and invalid types before sending an HTTP request.
+- [x] Test that AUD 10.00 is sent as amount `1000` and currency `AUD`.
+- [x] Accept a required merchant `order_id` and send it as the payment `reference`.
+- [x] Validate order IDs as nonblank strings of at most 80 characters; preserve
+  accepted IDs unchanged, including any surrounding whitespace.
+- [ ] Persist the association between merchant orders and provider payment IDs.
+- [ ] Store local payment records and map provider payment states.
+
+M2 is not complete. Tokenization flow selection and application-level error
+decisions remain tracked in the follow-up work above.
+
+Latest verified offline test result: **81 passed**. This does not verify live
 Sandbox authentication or payment processing.
 
 ## Planned Repository Structure

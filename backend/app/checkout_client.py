@@ -54,10 +54,16 @@ class CheckoutClient:
         response.raise_for_status()
         return response
     
-    def create_payment(self, amount: int, currency: str, token: str):
+    def create_payment(self, amount: int, currency: str, token: str, order_id: str):
         if type(amount) is not int or amount <= 0:
             raise ValueError("amount must be a positive integer in minor units")
 
+        if currency != "AUD":
+            raise ValueError("currency must be AUD")
+        
+        if type(order_id) is not str or not order_id.strip() or len(order_id) > 80:
+            raise ValueError("order_id must be a nonblank string of at most 80 characters")
+        
         url = f"{self.base_url.rstrip('/')}/payments"
 
         headers = {
@@ -72,7 +78,8 @@ class CheckoutClient:
             },
             "amount": amount,
             "currency": currency,
-            "capture": False
+            "capture": False,
+            "reference": order_id
         }
 
         response = httpx.post(
