@@ -71,6 +71,8 @@ Milestones are checked off only when code, tests, and documentation are complete
 
 ### M1 Complete — Configuration and HTTPX Client
 
+Learning notes: [M1 Key Learnings](docs/m1-key-learnings.md).
+
 M1 covers local configuration validation, authentication header construction,
 explicit timeouts, and propagation of HTTP errors to the caller. Credential
 validation here means local format checks, not verification of live Sandbox keys.
