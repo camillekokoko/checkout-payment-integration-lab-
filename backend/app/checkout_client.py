@@ -12,6 +12,7 @@ class CheckoutClient:
     def __init__(self):
         self.api_key = os.getenv("CHECKOUT_SECRET_KEY")
         self.base_url = os.getenv("CHECKOUT_BASE_URL")
+        self.processing_channel_id = os.getenv("CHECKOUT_PROCESSING_CHANNEL_ID")
         
         if not self.api_key:
             raise ValueError("CHECKOUT_SECRET_KEY is missing")  
@@ -63,6 +64,11 @@ class CheckoutClient:
         
         if type(order_id) is not str or not order_id.strip() or len(order_id) > 80:
             raise ValueError("order_id must be a nonblank string of at most 80 characters")
+
+        if not self.processing_channel_id or re.fullmatch(
+            r"pc_[A-Za-z0-9_]{26}", self.processing_channel_id
+        ) is None:
+            raise ValueError("CHECKOUT_PROCESSING_CHANNEL_ID is missing or invalid")
         
         url = f"{self.base_url.rstrip('/')}/payments"
 
@@ -79,7 +85,8 @@ class CheckoutClient:
             "amount": amount,
             "currency": currency,
             "capture": False,
-            "reference": order_id
+            "reference": order_id,
+            "processing_channel_id": self.processing_channel_id,
         }
 
         response = httpx.post(

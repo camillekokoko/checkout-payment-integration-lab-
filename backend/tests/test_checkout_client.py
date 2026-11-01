@@ -6,6 +6,29 @@ import pytest
 from app.checkout_client import CheckoutClient
 
 
+@pytest.fixture(autouse=True)
+def sandbox_processing_channel(monkeypatch):
+    monkeypatch.setenv("CHECKOUT_PROCESSING_CHANNEL_ID", "pc_" + "a" * 26)
+
+
+@pytest.mark.parametrize("channel_id", [None, "", "   ", "invalid", "pc_short", "pc_" + "a" * 27])
+def test_create_payment_rejects_invalid_processing_channel(monkeypatch, channel_id):
+    monkeypatch.setenv("CHECKOUT_SECRET_KEY", "sk_sbox_fake")
+    monkeypatch.setenv("CHECKOUT_BASE_URL", "https://test.api.sandbox.checkout.com")
+    if channel_id is None:
+        monkeypatch.delenv("CHECKOUT_PROCESSING_CHANNEL_ID", raising=False)
+    else:
+        monkeypatch.setenv("CHECKOUT_PROCESSING_CHANNEL_ID", channel_id)
+
+    client = CheckoutClient()
+    with patch("app.checkout_client.httpx.post") as mock_post:
+        with pytest.raises(ValueError, match="CHECKOUT_PROCESSING_CHANNEL_ID is missing or invalid"):
+            client.create_payment(
+                amount=1000, currency="AUD", token="tok_test_fake", order_id="order_1001"
+            )
+        mock_post.assert_not_called()
+
+
 @pytest.mark.parametrize("currency", ["USD", "HKD", "aud", "Aud", " AUD ", "", None, 36])
 def test_create_payment_rejects_unsupported_currency(monkeypatch, currency):
     monkeypatch.setenv("CHECKOUT_SECRET_KEY", "sk_sbox_fake")
@@ -37,6 +60,7 @@ def test_create_payment_sends_aud_amount_in_minor_units(monkeypatch):
         mock_post.assert_called_once()
         payload = mock_post.call_args.kwargs["json"]
         assert payload["currency"] == "AUD"
+        assert payload["processing_channel_id"] == "pc_" + "a" * 26
         assert payload["amount"] == 1000
         assert response is provider_response
 

@@ -130,6 +130,12 @@ the backend must not receive raw card details.
 - [x] Accept only the exact currency string `AUD`; reject other currencies,
   lowercase input, whitespace, and invalid types before sending an HTTP request.
 - [x] Test that AUD 10.00 is sent as amount `1000` and currency `AUD`.
+- [x] Validate `CHECKOUT_PROCESSING_CHANNEL_ID` before payment creation and send
+  it in the payment payload. This resolved the initial Sandbox
+  `422 processing_channel_id_required` error.
+- [x] Verify one live Sandbox flow: token creation `201`, AUD 10.00 payment
+  creation `201` with status `Authorized`, and payment lookup `200` returning
+  `Authorized`. No capture request was sent.
 - [x] Accept a required merchant `order_id` and send it as the payment `reference`.
 - [x] Validate order IDs as nonblank strings of at most 80 characters; preserve
   accepted IDs unchanged, including any surrounding whitespace.
@@ -139,7 +145,7 @@ the backend must not receive raw card details.
 M2 is not complete. Tokenization flow selection and application-level error
 decisions remain tracked in the follow-up work above.
 
-Latest verified offline test result: **81 passed**. This does not verify live
+Latest verified offline test result: **87 passed**. This does not verify live
 Sandbox authentication or payment processing.
 
 ## Planned Repository Structure
@@ -185,9 +191,38 @@ Configure a local `.env` file (never commit it):
 ```dotenv
 CHECKOUT_SECRET_KEY=sk_sbox_REPLACE_ME
 CHECKOUT_BASE_URL=https://YOUR_PREFIX.api.sandbox.checkout.com
+CHECKOUT_PROCESSING_CHANNEL_ID=pc_REPLACE_WITH_YOUR_SANDBOX_CHANNEL_ID
 ```
 
 These are placeholders. Use the account-specific Sandbox base URL and credentials. Frontend/Docker setup instructions will be added once implemented.
+
+### Manual Sandbox Payment (Opt-in)
+
+From the project root:
+
+```bash
+.venv/bin/python backend/scripts/create_sandbox_payment.py
+```
+
+This is a live Sandbox learning exercise, not an offline test. The script first
+reads `CHECKOUT_BASE_URL`, `CHECKOUT_SECRET_KEY`, `CHECKOUT_PUBLIC_KEY`, and
+`CHECKOUT_PROCESSING_CHANNEL_ID` from the
+process environment, with local `.env` loading provided by `CheckoutClient`.
+Existing environment values take precedence. Missing or invalid settings stop
+the script before any API request; there are no interactive configuration prompts.
+The script uses a fixed provider example test card to create a token,
+requests one AUD 10.00 payment with `capture=False`, then looks up the returned
+payment ID. It prints selected status fields and identifiers, not credentials,
+tokens, or complete response bodies. It does not automatically retry. If payment
+creation or lookup fails, inspect the Dashboard using the printed order reference
+or payment ID before running it again. Account configuration may require additional
+fields; a successful authorization is not guaranteed.
+
+The script has been checked offline with mocked responses. A user-run live
+Sandbox exercise also verified token creation (`201`), payment authorization
+(`201`, `Authorized`), and lookup (`200`, `Authorized`). This verifies that flow
+for the tested configuration; it does not verify capture, settlement, webhooks,
+or reconciliation.
 
 ### Offline Unit Tests
 
