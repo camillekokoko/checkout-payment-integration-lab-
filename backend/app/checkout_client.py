@@ -1,6 +1,8 @@
 from locale import currency
 import os
+import re
 import token
+from urllib.parse import urlsplit
 import httpx
 from dotenv import load_dotenv
 
@@ -13,8 +15,33 @@ class CheckoutClient:
         
         if not self.api_key:
             raise ValueError("CHECKOUT_SECRET_KEY is missing")  
+        if not self.api_key.startswith("sk_sbox_"):
+            raise ValueError("CHECKOUT_SECRET_KEY must be a Sandbox key")
         if not self.base_url:
             raise ValueError("CHECKOUT_BASE_URL is missing")   
+        try:
+            parsed_url = urlsplit(self.base_url)
+            valid_url = (
+                parsed_url.scheme == "https"
+                and re.fullmatch(
+                    r"[a-z0-9-]+\.api\.sandbox\.checkout\.com",
+                    parsed_url.hostname or "",
+                ) is not None
+                and parsed_url.username is None
+                and parsed_url.password is None
+                and parsed_url.port is None
+                and parsed_url.netloc.lower() == parsed_url.hostname
+                and parsed_url.path in ("", "/")
+                and not parsed_url.query
+                and not parsed_url.fragment
+            )
+        except ValueError:
+            valid_url = False
+
+        if not valid_url:
+            raise ValueError("CHECKOUT_BASE_URL must be a Sandbox HTTPS base URL")
+
+        self.base_url = self.base_url.rstrip("/")
         
         
     def get_payment(self, payment_id: str):
@@ -23,6 +50,8 @@ class CheckoutClient:
             "Authorization": f"Bearer {self.api_key}",
         }
         response = httpx.get(url, headers=headers, timeout=10.0)
+        
+        response.raise_for_status()
         return response
     
     def create_payment(self, amount: int, currency: str, token: str):
@@ -52,7 +81,7 @@ class CheckoutClient:
             json=payload,
             timeout=10.0
         )
-
+        response.raise_for_status()
         return response
     
     def create_token(self, card: dict):
@@ -82,5 +111,7 @@ class CheckoutClient:
             json=payload,
             timeout=10.0
         )
-
+        
+        response.raise_for_status()
         return response
+
