@@ -73,6 +73,26 @@ could create another payment. Flow setup, account scopes, authorization-only
 configuration, and endpoint details must be verified when implementing M7.
 No Payment Session endpoint or frontend component has been implemented in M2.
 
+## Python design concepts
+
+| Concept | Project example | Why it helps |
+| --- | --- | --- |
+| Class vs instance | `Order` vs `Order("order_001", 1000, "AUD")` | The class defines the structure; each instance holds its own values. |
+| Dataclass | `Order`, `Payment`, `PaymentErrorDecision` | Generates methods such as `__init__`, `__repr__`, and `__eq__`, reducing boilerplate. |
+| Encapsulation | `CheckoutClient` | Groups configuration, URLs, authentication headers, and HTTP calls behind client methods. |
+| Immutability | `@dataclass(frozen=True)` | Blocks ordinary field reassignment; create a new record for an updated payment snapshot. |
+| Separation of concerns | Client, service functions, models | HTTP details, application decisions, and data structures have distinct responsibilities. |
+
+Dataclasses are a Python tool for expressing data, not a separate OOP principle.
+Type hints do not enforce runtime validation: `payment_from_response()` explicitly
+checks the required response fields. Neither a dataclass nor `frozen=True` saves
+anything to a database. Freezing is shallow: mutable objects inside fields would
+still be mutable; the current models contain strings and integers.
+
+Service logic can remain plain functions. No inheritance hierarchy is needed
+for the current design. An immutable `Payment` is a snapshot, not a live object
+that updates itself when the provider's status changes.
+
 ## Remaining milestones
 
 - M3: Capture, void, refund operations and their state mappings.
