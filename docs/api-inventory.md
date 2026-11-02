@@ -11,13 +11,15 @@ This list describes the repository's current integration, not every provider API
 | `GET /payments/{id}` | `get_payment(payment_id)` | Read payment status and capture balances | Secret | Mock tests and earlier user-run live Sandbox `200`, Authorized |
 | `POST /payments/{id}/captures` | `capture_payment(payment_id, amount, reference)` | Submit a capture action | Secret | Mock tests and user-run live Sandbox acceptance; action subsequently confirmed succeeded |
 | `GET /payments/{id}/actions` | `get_payment_actions(payment_id)` | Read action history and reconcile a specific capture | Secret | Mock tests and user-run live Sandbox confirmation: succeeded (2026-11-02) |
-| `POST /payments/{id}/voids` | `void_payment(payment_id, amount, reference)` | Release remaining uncaptured authorization | Secret | Mocks and user-run live request accepted; Void confirmation pending |
-| `POST /payments/{id}/refunds` | `refund_payment(payment_id, amount, reference)` | Return captured funds within refund availability | Secret | Mocks and user-run live request accepted; Refund confirmation pending |
+| `POST /payments/{id}/voids` | `void_payment(payment_id, amount, reference)` | Release remaining uncaptured authorization | Secret | Mocks and user-run live Void action confirmation: succeeded |
+| `POST /payments/{id}/refunds` | `refund_payment(payment_id, amount, reference)` | Return captured funds within refund availability | Secret | Mocks and user-run live Partial Refund `400` and remaining Refund `600` action confirmations: succeeded, Reason None |
 
 The capture endpoint also supports explicit `NonFinal` and `Final` choices. The
-partial-capture request now has user-run live acceptance evidence, with its
-specific action confirmation pending. Final-remaining capture is mock-verified
-only; the earlier first full capture is the live-confirmed scenario.
+partial-capture request and its specific action are user-verified live as
+succeeded. Final-remaining Capture `500` was also confirmed `succeeded`,
+`Reason: None` (2026-11-02), as was remaining Refund `600`. The earlier first full
+capture was also confirmed live. These are exact-action confirmations, not
+independent verification of fresh payment balances or settlement.
 
 API definitions: [Tokens reference](https://api-reference.checkout.com/tag/tokens)
 and [Payments reference](https://api-reference.checkout.com/tag/payments).

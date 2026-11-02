@@ -9,8 +9,13 @@ An AUD 10.00 order is authorized, but only AUD 5.00 of goods ship today.
 Collect 500 using NonFinal and leave the rest open. After confirming the first
 action and checking fresh balances, collect the remaining 500 using --final.
     python scripts/5_payment_operations.py partial-capture PAYMENT_ID --amount 500 --reference shipment_001
+    python scripts/5_payment_operations.py confirm PAYMENT_ID --action-id FIRST_CAPTURE_ACTION_ID --action-type Capture --amount 500 --reference shipment_001
+Once succeeded, the next write checks fresh available_to_capture = 500:
     python scripts/5_payment_operations.py partial-capture PAYMENT_ID --amount 500 --reference shipment_final --final
-The second command is a separate business decision, not an automatic next step.
+    python scripts/5_payment_operations.py confirm PAYMENT_ID --action-id FINAL_CAPTURE_ACTION_ID --action-type Capture --amount 500 --reference shipment_final
+The final capture write is a separate business decision, not an automatic next step.
+Final must consume all current capture availability in this service. Successful
+500 + 500 actions imply 1000 captured; independently verify fresh payment balances.
 
 CASE 2 - Customer cancels before dispatch: void
 An AUD 10.00 authorization has no captures. Release the full remaining 1000
@@ -22,6 +27,19 @@ An AUD 10.00 payment was captured. Return AUD 4.00 (400), within the current
 refundable balance. After confirmed success, 600 remains unrefunded if there
 were no other refunds. Void and refund serve different payment lifecycle stages.
     python scripts/5_payment_operations.py refund PAYMENT_ID --amount 400 --reference return_001
+    python scripts/5_payment_operations.py confirm PAYMENT_ID --action-id FIRST_REFUND_ACTION_ID --action-type Refund --amount 400 --reference return_001
+If the remaining goods are also returned, confirm the first refund succeeded,
+then request the remaining 600 only within fresh available_to_refund:
+    python scripts/5_payment_operations.py refund PAYMENT_ID --amount 600 --reference return_final
+    python scripts/5_payment_operations.py confirm PAYMENT_ID --action-id REMAINING_REFUND_ACTION_ID --action-type Refund --amount 600 --reference return_final
+Remaining refund uses the same refund command, with no --final flag. Successful
+400 + 600 actions imply 1000 refunded; independently verify fresh payment balances.
+These are separate return decisions, not a batch to execute automatically.
+
+LIVE EVIDENCE (2026-11-02)
+Final-remaining Capture 500 (shipment_final) and remaining Refund 600 (return_final)
+each reported Confirmation: succeeded, Reason: None. See docs/m3-payment-lifecycle.md
+for exact IDs. These completed examples are evidence, not instructions to resend.
 
 AFTER EACH ACCEPTED REQUEST - Read-only confirmation
 Keep the returned action ID. Use Capture, Void, or Refund to match the action

@@ -7,6 +7,14 @@ capture, void, refund, CLI examples, and verification evidence.
 The cheat sheet was generated with imagegen; its prompt is kept locally and
 excluded from Git. The Dashboard screenshot below is the user's original image.
 
+**M3 scoped completion (2026-11-02):** internal AUD Sandbox services, CLI commands,
+automated tests and representative live operation confirmations are complete.
+Full capture, partial capture, void and partial refund actions were confirmed
+live. Final-remaining capture `500` and remaining refund `600` were also confirmed
+`succeeded`, with `Reason: None` for both actions.
+This does not complete an authenticated merchant API, idempotency, storage,
+webhooks or settlement verification.
+
 Related references: [API inventory](api-inventory.md) and
 [layer responsibilities](m2-completion.md#layer-responsibilities-what-belongs-where-and-why).
 
@@ -172,16 +180,30 @@ python scripts/5_payment_operations.py partial-capture pay_REPLACE_WITH_PAYMENT_
   --amount 500 --reference shipment_001
 ```
 
+Confirm the first action using its returned ID (each command stays on one line):
+
+```bash
+python scripts/5_payment_operations.py confirm pay_REPLACE_WITH_PAYMENT_ID --action-id act_REPLACE_WITH_FIRST_CAPTURE_ACTION_ID --action-type Capture --amount 500 --reference shipment_001
+```
+
 After confirming the first action and checking current balances, a separate final
 capture of a remaining `500` would use:
 
 ```bash
-python scripts/5_payment_operations.py partial-capture pay_REPLACE_WITH_PAYMENT_ID \
-  --amount 500 --reference shipment_final --final
+python scripts/5_payment_operations.py partial-capture pay_REPLACE_WITH_PAYMENT_ID --amount 500 --reference shipment_final --final
+```
+
+Keep the **new** action ID and confirm this final capture separately:
+
+```bash
+python scripts/5_payment_operations.py confirm pay_REPLACE_WITH_PAYMENT_ID --action-id act_REPLACE_WITH_FINAL_CAPTURE_ACTION_ID --action-type Capture --amount 500 --reference shipment_final
 ```
 
 Do not run the second request merely because the first returned `accepted`.
 Confirm the first operation and investigate uncertainty before any further write.
+The final write performs a fresh lookup and requires `available_to_capture = 500`
+for this example. Successful `500 + 500` actions imply `1000` captured; a fresh
+payment snapshot should independently verify the resulting balances.
 
 ## Scenario 2: Void an uncaptured authorization
 
@@ -215,6 +237,35 @@ Full refund means requesting all current refundable availability. Both full and
 partial refund are supported, but the provider still decides eligibility.
 Amex operation references above 30 characters are rejected before the write;
 the generic request reference limit remains 80 for other supported card schemes.
+
+### Remaining refund after a partial return
+
+If the customer later returns the remaining goods, first confirm the original
+`400` refund using its action ID:
+
+```bash
+python scripts/5_payment_operations.py confirm pay_REPLACE_WITH_PAYMENT_ID --action-id act_REPLACE_WITH_FIRST_REFUND_ACTION_ID --action-type Refund --amount 400 --reference return_001
+```
+
+After `succeeded`, and with fresh `available_to_refund = 600`, submit the separate
+remaining refund once. The service looks up current availability before the POST:
+
+```bash
+python scripts/5_payment_operations.py refund pay_REPLACE_WITH_PAYMENT_ID --amount 600 --reference return_final
+```
+
+Keep its **new** action ID and confirm that exact `600` action:
+
+```bash
+python scripts/5_payment_operations.py confirm pay_REPLACE_WITH_PAYMENT_ID --action-id act_REPLACE_WITH_REMAINING_REFUND_ACTION_ID --action-type Refund --amount 600 --reference return_final
+```
+
+Refund has no `--final` flag: requesting the full currently refundable balance
+makes this a remaining refund. Successful `400 + 600` actions imply `1000`
+refunded overall, rather than a second `1000` refund. Independently verify fresh
+payment balances. Unknown outcomes require reconciliation before another write.
+The final Capture and remaining Refund examples below were both confirmed
+`succeeded`, `Reason: None` on 2026-11-02; do not resubmit those completed actions.
 
 ## Confirm each action without repeating a write
 
@@ -275,22 +326,38 @@ On 2026-11-02, the user confirmed a specific AUD 10.00 full-capture action:
 settlement or concurrency verification.
 On 2026-11-02, the user also supplied these new live request results:
 
-| Business case | Observed evidence | Still needed |
+| Business case | Observed evidence | Action verification |
 | --- | --- | --- |
-| Split shipment / partial capture | User console log shows Capture `500` accepted with its action ID; Dashboard also shows Partially captured | Read-only confirmation of that Capture action |
-| Cancel before capture / void | New AUD 10.00 authorization; void `1000` returned accepted with an action ID | Read-only confirmation of that Void action |
-| Return after capture / refund | Previously captured AUD 10.00 payment; refund `400` returned accepted with an action ID | Read-only confirmation of that Refund action |
+| Split shipment / partial capture | Capture `500` accepted; Dashboard shows Partially captured | Exact Capture action confirmed succeeded, Reason None |
+| Cancel before capture / void | New AUD 10.00 authorization; void `1000` accepted | Exact Void action confirmed succeeded, Reason None |
+| Return after capture / refund | Previously captured AUD 10.00 payment; refund `400` accepted | Exact Refund action confirmed succeeded, Reason None |
 
 ### Known action lookup inputs
 
-The user supplied the following identifiers in the terminal log. All three
-requests were accepted; their separate action confirmations have not been supplied.
+The user supplied the following identifiers and subsequent read-only confirmation
+outputs. All three actions reported `succeeded` with `Reason: None` on 2026-11-02.
 
 | Action type | Payment ID | Action ID | Amount | Reference |
 | --- | --- | --- | --- | --- |
 | Capture | `pay_elcyababuq5yhhkhqnxsn6tiry` | `act_ugtffbdscuievodaqmg7chrzbq` | 500 | shipment_001 |
 | Void | `pay_ylccplibor5yfarvmhg322xdni` | `act_n7fzlqxsfifexfqpnqovig7g5u` | 1000 | canceled_order_001 |
 | Refund | `pay_nna4tjqbpqbidl22nvvomxj6zm` | `act_2gst7qngpw7ufpbdd73qx5vgbq` | 400 | return_001 |
+
+### Additional operations confirmed succeeded
+
+The user subsequently submitted the remaining capture and refund amounts. Both
+requests returned accepted. On 2026-11-02, the user supplied read-only confirmation
+outputs for both actions: `Confirmation: succeeded`, `Reason: None`.
+
+| Action type | Payment ID | New action ID | Amount | Reference |
+| --- | --- | --- | --- | --- |
+| Capture (Final) | `pay_elcyababuq5yhhkhqnxsn6tiry` | `act_uvzvpvxfazyuxiaq7ae7pm7o4i` | 500 | shipment_final |
+| Refund (remaining) | `pay_nna4tjqbpqbidl22nvvomxj6zm` | `act_mwgzbzk36w6utkv3ovijscz3ye` | 600 | return_final |
+
+Both action confirmations are complete. The successful actions imply a cumulative
+capture of `1000` for the first payment and a cumulative refund of `1000` for the
+second. Fresh payment balances remain to be checked to independently verify those
+totals; action confirmation does not establish settlement.
 
 An initial void attempt on a different older payment was blocked before POST.
 The generic validation message does not establish the exact eligibility reason.

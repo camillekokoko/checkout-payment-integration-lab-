@@ -50,7 +50,7 @@ The exact Checkout.com client SDK and session/tokenization flow depend on the ch
 ### Phase 1: Python Backend & Provider Integration
 - [x] M1: Sandbox configuration, credentials validation, and HTTPX client
 - [x] M2: Sandbox payment creation/lookup, validation, in-memory records, and error decisions
-- [ ] M3: Authorization-only, capture, void, and refunds (where supported)
+- [x] M3: Sandbox authorization-only, capture, void, and refund services (scoped)
 - [ ] M4: Idempotency, safe retries, and timeout reconciliation
 - [ ] M5: Webhook signature verification, deduplication, and event processing
 - [ ] M6: PostgreSQL order/payment/operation/event persistence
@@ -168,7 +168,13 @@ validates request formats and requires an explicit keyword-only `capture` boolea
 it forwards the currency and capture choice instead of deciding merchant policy.
 The manual Sandbox script invokes the service and still sends `capture=False`.
 
-### M3 In Progress — Capture, Void, and Refund
+### M3 Complete — Sandbox Capture, Void, and Refund Services
+
+M3 completion covers the internal AUD Sandbox services, CLI flows, mocks and
+representative live action confirmations. Authenticated merchant API access,
+idempotency, durable operation storage and verified webhooks remain later work.
+Final-remaining capture `500` and remaining refund `600` also have user-run live
+exact-action confirmations: `succeeded`, `Reason: None` (2026-11-02).
 
 - [x] Add the capture client method with payment ID, positive integer amount,
   and reference validation before sending a request.
@@ -199,9 +205,14 @@ The manual Sandbox script invokes the service and still sends `capture=False`.
   void, and refund states. Operator authentication and persistence remain future work.
 - [x] User-run live Sandbox void `1000` and refund `400` requests returned accepted
   with action IDs (2026-11-02); acceptance is not final confirmation.
-- [ ] Confirm the live Void and Refund actions using read-only action lookup.
+- [x] Live Void `1000` and Refund `400` exact-action lookups both reported
+  `Confirmation: succeeded`, `Reason: None` (2026-11-02).
 - [x] User console log supplied live partial capture `500` acceptance and its action ID.
-- [ ] Confirm the live partial Capture action using read-only action lookup.
+- [x] Live partial Capture `500` exact-action lookup reported
+  `Confirmation: succeeded`, `Reason: None` (2026-11-02).
+- [x] Live final-remaining Capture `500` (`shipment_final`) and remaining Refund
+  `600` (`return_final`) exact-action lookups both reported
+  `Confirmation: succeeded`, `Reason: None` (2026-11-02).
 
 Business scenarios, walkthroughs, commands and Dashboard evidence:
 [M3 Payment Lifecycle](docs/m3-payment-lifecycle.md).
@@ -333,9 +344,11 @@ Neither command persists results or establishes settlement.
 
 Partial capture, void, refund and generic action confirmation commands are grouped
 under `scripts/5_payment_operations.py`; see [M3 Payment Lifecycle](docs/m3-payment-lifecycle.md).
-Void and refund requests have user-run live acceptance evidence, with action
-confirmation pending. Partial capture also has user-run acceptance evidence;
-its exact-action confirmation is still pending.
+User-run live lookups confirmed full capture, partial capture, void and partial
+refund actions succeeded. Final-remaining Capture `500` and remaining Refund
+`600` were also confirmed `succeeded`, `Reason: None` (2026-11-02). These are
+action confirmations; fresh payment balances and settlement are not independently
+verified by this evidence.
 
 ### Offline Unit Tests
 
