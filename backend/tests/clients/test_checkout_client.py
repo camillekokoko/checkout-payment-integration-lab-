@@ -24,21 +24,21 @@ def test_create_payment_rejects_invalid_processing_channel(monkeypatch, channel_
     with patch("app.clients.checkout_client.httpx.post") as mock_post:
         with pytest.raises(ValueError, match="CHECKOUT_PROCESSING_CHANNEL_ID is missing or invalid"):
             client.create_payment(
-                amount=1000, currency="AUD", token="tok_test_fake", order_id="order_1001"
+                amount=1000, currency="AUD", token="tok_test_fake", order_id="order_1001", capture=False
             )
         mock_post.assert_not_called()
 
 
-@pytest.mark.parametrize("currency", ["USD", "HKD", "aud", "Aud", " AUD ", "", None, 36])
-def test_create_payment_rejects_unsupported_currency(monkeypatch, currency):
+@pytest.mark.parametrize("currency", ["aud", "Aud", " AUD ", "", None, 36])
+def test_create_payment_rejects_malformed_currency(monkeypatch, currency):
     monkeypatch.setenv("CHECKOUT_SECRET_KEY", "sk_sbox_fake")
     monkeypatch.setenv("CHECKOUT_BASE_URL", "https://test.api.sandbox.checkout.com")
 
     client = CheckoutClient()
 
     with patch("app.clients.checkout_client.httpx.post") as mock_post:
-        with pytest.raises(ValueError, match="currency must be AUD"):
-            client.create_payment(amount=1000, currency=currency, token="tok_test_fake", order_id="order_1001")
+        with pytest.raises(ValueError, match="currency must be a three-letter uppercase code"):
+            client.create_payment(amount=1000, currency=currency, token="tok_test_fake", order_id="order_1001", capture=False)
 
         mock_post.assert_not_called()
 
@@ -55,7 +55,7 @@ def test_create_payment_sends_aud_amount_in_minor_units(monkeypatch):
     )
 
     with patch("app.clients.checkout_client.httpx.post", return_value=provider_response) as mock_post:
-        response = client.create_payment(amount=1000, currency="AUD", token="tok_test_fake", order_id="order_1001")
+        response = client.create_payment(amount=1000, currency="AUD", token="tok_test_fake", order_id="order_1001", capture=False)
 
         mock_post.assert_called_once()
         payload = mock_post.call_args.kwargs["json"]
@@ -77,10 +77,32 @@ def test_create_payment_rejects_invalid_order_id(monkeypatch, order_id):
             ValueError, match="order_id must be a nonblank string of at most 80 characters"
         ):
             client.create_payment(
-                amount=1000, currency="AUD", token="tok_test_fake", order_id=order_id
+                amount=1000, currency="AUD", token="tok_test_fake", order_id=order_id, capture=False
             )
 
         mock_post.assert_not_called()
+
+
+@pytest.mark.parametrize("currency,capture", [("AUD", False), ("USD", True), ("HKD", False)])
+def test_client_forwards_currency_and_explicit_capture_choice(monkeypatch, currency, capture):
+    # Provider transport is reusable; merchant policy is tested in the service.
+    monkeypatch.setenv("CHECKOUT_SECRET_KEY", "sk_sbox_fake")
+    monkeypatch.setenv("CHECKOUT_BASE_URL", "https://test.api.sandbox.checkout.com")
+    response = httpx.Response(201, request=httpx.Request("POST", "https://checkout.invalid"))
+    with patch("app.clients.checkout_client.httpx.post", return_value=response) as post:
+        CheckoutClient().create_payment(1000, currency, "tok_fake", "order_001", capture=capture)
+    assert post.call_args.kwargs["json"]["currency"] == currency
+    assert post.call_args.kwargs["json"]["capture"] is capture
+
+
+@pytest.mark.parametrize("capture", [None, 0, 1, "false"])
+def test_client_rejects_invalid_capture_flag(monkeypatch, capture):
+    monkeypatch.setenv("CHECKOUT_SECRET_KEY", "sk_sbox_fake")
+    monkeypatch.setenv("CHECKOUT_BASE_URL", "https://test.api.sandbox.checkout.com")
+    with patch("app.clients.checkout_client.httpx.post") as post:
+        with pytest.raises(ValueError, match="capture must be a boolean"):
+            CheckoutClient().create_payment(1000, "AUD", "tok_fake", "order_001", capture=capture)
+        post.assert_not_called()
 
 
 @pytest.mark.parametrize("order_id", ["order_1001", "x", "x" * 80, " order_1001 "])
@@ -97,7 +119,7 @@ def test_create_payment_sends_order_id_as_reference(monkeypatch, order_id):
 
     with patch("app.clients.checkout_client.httpx.post", return_value=provider_response) as mock_post:
         client.create_payment(
-            amount=1000, currency="AUD", token="tok_test_fake", order_id=order_id
+            amount=1000, currency="AUD", token="tok_test_fake", order_id=order_id, capture=False
         )
 
         mock_post.assert_called_once()
@@ -169,7 +191,7 @@ def test_create_payment_uses_secret_key(monkeypatch):
             request=httpx.Request("POST", "https://test.api.sandbox.checkout.com/payments"),
         )
 
-        response = client.create_payment(amount=1000, currency="AUD", token="tok_test_fake", order_id="order_1001")
+        response = client.create_payment(amount=1000, currency="AUD", token="tok_test_fake", order_id="order_1001", capture=False)
 
         assert response is mock_post.return_value
         mock_post.assert_called_once()
@@ -193,7 +215,7 @@ def test_create_payment_propagates_http_error(monkeypatch, status_code):
     # Do not retry here: a server error does not prove payment processing failed.
     with patch("app.clients.checkout_client.httpx.post", return_value=provider_response) as mock_post:
         with pytest.raises(httpx.HTTPStatusError) as exc_info:
-            client.create_payment(amount=1000, currency="AUD", token="tok_test_fake", order_id="order_1001")
+            client.create_payment(amount=1000, currency="AUD", token="tok_test_fake", order_id="order_1001", capture=False)
 
         assert exc_info.value.response is provider_response
         assert exc_info.value.response.status_code == status_code
@@ -410,7 +432,7 @@ def test_create_payment_propagates_timeout(monkeypatch):
         mock_post.side_effect = httpx.ReadTimeout("Simulated timeout")
 
         with pytest.raises(httpx.ReadTimeout):
-            client.create_payment(amount=1000, currency="AUD", token="tok_test_fake", order_id="order_1001")
+            client.create_payment(amount=1000, currency="AUD", token="tok_test_fake", order_id="order_1001", capture=False)
 
         mock_post.assert_called_once()
 
@@ -426,6 +448,6 @@ def test_create_payment_rejects_invalid_amount(monkeypatch, amount):
         with pytest.raises(
             ValueError, match="amount must be a positive integer in minor units"
         ):
-            client.create_payment(amount=amount, currency="AUD", token="tok_test_fake", order_id="order_1001")
+            client.create_payment(amount=amount, currency="AUD", token="tok_test_fake", order_id="order_1001", capture=False)
 
         mock_post.assert_not_called()

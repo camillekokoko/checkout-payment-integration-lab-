@@ -67,12 +67,29 @@ class CheckoutClient:
         response.raise_for_status()
         return response
     
-    def create_payment(self, amount: int, currency: str, token: str, order_id: str):
+    def get_payment_actions(self, payment_id: str):
+        """GET /payments/{id}/actions for read-only operation reconciliation."""
+        if not isinstance(payment_id, str) or re.fullmatch(r"pay_[A-Za-z0-9_]{26}", payment_id) is None:
+            raise ValueError("payment_id is missing or invalid")
+        response = httpx.get(
+            f"{self.base_url}/payments/{payment_id}/actions",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            timeout=10.0,
+        )
+        response.raise_for_status()
+        return response
+
+    def create_payment(
+        self, amount: int, currency: str, token: str, order_id: str, *, capture: bool
+    ):
+        """Send a payment request; the caller chooses the capture strategy."""
         if type(amount) is not int or amount <= 0:
             raise ValueError("amount must be a positive integer in minor units")
 
-        if currency != "AUD":
-            raise ValueError("currency must be AUD")
+        if not isinstance(currency, str) or re.fullmatch(r"[A-Z]{3}", currency) is None:
+            raise ValueError("currency must be a three-letter uppercase code")
+        if type(capture) is not bool:
+            raise ValueError("capture must be a boolean")
         
         if type(order_id) is not str or not order_id.strip() or len(order_id) > 80:
             raise ValueError("order_id must be a nonblank string of at most 80 characters")
@@ -93,7 +110,7 @@ class CheckoutClient:
             },
             "amount": amount,
             "currency": currency,
-            "capture": False,
+            "capture": capture,
             "reference": order_id,
             "processing_channel_id": self.processing_channel_id,
         }
@@ -135,3 +152,41 @@ class CheckoutClient:
         response.raise_for_status()
         return response
 
+    def capture_payment(self, payment_id: str, amount: int, reference: str):
+        """POST /payments/{id}/captures; 202 accepts a request, not completed capture.
+
+        Eligibility and remaining balance checks belong to the capture service.
+        Errors propagate without automatic retries.
+        """
+        if not isinstance(payment_id, str) or re.fullmatch(
+            r"pay_[A-Za-z0-9_]{26}", payment_id
+        ) is None:
+            raise ValueError("payment_id is missing or invalid")
+
+        if type(amount) is not int or amount <= 0:
+            raise ValueError("amount must be a positive integer in minor units")
+
+        if type(reference) is not str or not reference.strip() or len(reference) > 80:
+            raise ValueError("reference must be a nonblank string of at most 80 characters")
+
+        url = f"{self.base_url.rstrip('/')}/payments/{payment_id}/captures"
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "amount": amount,
+            "reference": reference
+        }
+
+        response = httpx.post(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=10.0
+        )
+
+        response.raise_for_status()
+        return response

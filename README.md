@@ -134,7 +134,7 @@ Visual reference: [M2 Cheat Sheet (JPG)](docs/assets/m2-cheat-sheet.jpg).
 
 - [x] Implement payment creation and lookup client methods.
 - [x] Validate positive integer amounts in minor units, rejecting booleans.
-- [x] Accept only the exact currency string `AUD`; reject other currencies,
+- [x] Apply the merchant's AUD-only policy in the payment service; reject other currencies,
   lowercase input, whitespace, and invalid types before sending an HTTP request.
 - [x] Test that AUD 10.00 is sent as amount `1000` and currency `AUD`.
 - [x] Validate `CHECKOUT_PROCESSING_CHANNEL_ID` before payment creation and send
@@ -159,8 +159,45 @@ Visual reference: [M2 Cheat Sheet (JPG)](docs/assets/m2-cheat-sheet.jpg).
 The script's records are not persisted. Safe retries/idempotency (M4), webhooks
 (M5), PostgreSQL (M6), and Flow UI/session endpoints (M7) remain unfinished.
 
-Latest verified offline test result: **136 passed** (client, model, service, and script tests). This does not verify live
+Latest verified offline test result: **310 passed** (client, model, service, and script tests). This does not verify live
 Sandbox authentication or payment processing.
+
+Layer responsibilities: `authorize_order_payment(client, order, token)` applies
+the merchant's AUD-only, authorization-only policy. `CheckoutClient.create_payment()`
+validates request formats and requires an explicit keyword-only `capture` boolean;
+it forwards the currency and capture choice instead of deciding merchant policy.
+The manual Sandbox script invokes the service and still sends `capture=False`.
+
+### M3 In Progress — Capture, Void, and Refund
+
+- [x] Add the capture client method with payment ID, positive integer amount,
+  and reference validation before sending a request.
+- [x] Test capture URL, Secret Key header, payload, timeout, and forwarding of a
+  mocked `202 Accepted` response. Acceptance is not capture completion.
+- [x] Test invalid inputs send no request and HTTP/transport errors propagate
+  without automatic retries (33 capture tests).
+- [x] Add a first-full-capture service: fresh lookup, matching payment ID, AUD,
+  Authorized status, and integer balance checks before POST. Reject previous
+  captures/voids, partial requests, and amounts above the available balance.
+- [x] Return request outcomes as accepted, rejected, or unknown; a valid `202`
+  acknowledgement records an action ID without marking the payment captured.
+- [x] Test the complete capture service with mocked HTTP (58 service cases),
+  including lookup failures, malformed responses, and no automatic retries.
+- [x] Add a read-only capture confirmation service using the exact action ID,
+  Capture type, amount, and boolean approval; missing evidence remains unknown.
+- [x] Test confirmation and the combined capture/confirmation scenario without
+  another capture POST. No automatic polling, retries, or persistence added.
+- [x] User-run live Sandbox capture request returned accepted with an action ID.
+- [x] User-run live Sandbox action lookup confirmed the specific AUD 10.00
+  capture succeeded (`Confirmation: succeeded`, `Reason: None`, 2026-11-02).
+  This verifies the capture action, not settlement.
+- [ ] Implement and test void and refund operations and relevant state handling.
+
+Business scenario and walkthrough: [M3 Capture Flow](docs/m3-capture-flow.md).
+Visual reference: [M3 Cheat Sheet](docs/assets/m3-cheat-sheet.jpg).
+Provider endpoints and live/mock verification: [API Inventory](docs/api-inventory.md).
+Lookup plus capture is not atomic and does not prevent concurrent or repeated
+requests; idempotency and durable operation tracking remain follow-up work.
 
 ## Planned Repository Structure
 
@@ -174,7 +211,10 @@ checkout-payment-integration-lab/
 │   │   ├── webhooks/
 │   │   └── models/
 │   ├── scripts/
-│   │   └── create_sandbox_payment.py  # Manual Sandbox learning flow
+│   │   ├── 1_create_sandbox_payment.py
+│   │   ├── 2_get_sandbox_payment.py
+│   │   ├── 3_capture_sandbox_payment.py
+│   │   └── 4_confirm_sandbox_capture.py
 │   └── tests/
 │       ├── clients/
 │       ├── models/
@@ -221,7 +261,7 @@ These are placeholders. Use the account-specific Sandbox base URL and credential
 From the project root:
 
 ```bash
-.venv/bin/python backend/scripts/create_sandbox_payment.py
+.venv/bin/python backend/scripts/1_create_sandbox_payment.py
 ```
 
 This is a live Sandbox learning exercise, not an offline test. The script first
@@ -243,6 +283,41 @@ Sandbox exercise also verified token creation (`201`), payment authorization
 (`201`, `Authorized`), and lookup (`200`, `Authorized`). This verifies that flow
 for the tested configuration; it does not verify capture, settlement, webhooks,
 or reconciliation.
+
+### Read-only Sandbox Payment Lookup (Opt-in)
+
+From the project root, replace the ID below with an existing Sandbox payment ID:
+
+```bash
+.venv/bin/python backend/scripts/2_get_sandbox_payment.py pay_REPLACE_WITH_PAYMENT_ID
+```
+
+This script sends one GET and prints only the payment ID, status, currency and
+selected balances. It does not create payments, submit captures, or retry.
+Missing or invalid balances are reported as an unexpected response, not zero.
+
+### Manual Sandbox Capture and Confirmation (Opt-in)
+
+From `backend/`, with the virtual environment activated, submit a first full
+capture only for an eligible authorization. Replace the example IDs and reference:
+
+```bash
+python scripts/3_capture_sandbox_payment.py pay_REPLACE_WITH_PAYMENT_ID \
+  --amount 1000 --reference capture_order_001
+```
+
+This command performs a fresh GET and, if eligible, one capture POST. Keep its
+action ID. Do not rerun it to check results; use the read-only command instead:
+
+```bash
+python scripts/4_confirm_sandbox_capture.py pay_REPLACE_WITH_PAYMENT_ID act_REPLACE_WITH_ACTION_ID \
+  --amount 1000 --reference capture_order_001
+```
+
+Confirmation reads actions once. It never submits a capture or retries. Capture
+exit codes: `0` accepted, `1` blocked/rejected/error, `2` uncertain. Confirmation
+exit codes: `0` succeeded, `1` failed/invalid input/configuration, `2` unknown.
+Neither command persists results or establishes settlement.
 
 ### Offline Unit Tests
 

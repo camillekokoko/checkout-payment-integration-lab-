@@ -18,7 +18,7 @@ def sandbox_script(monkeypatch):
     get = Mock(side_effect=AssertionError("Unexpected HTTP GET"))
     monkeypatch.setattr(httpx, "post", post)
     monkeypatch.setattr(httpx, "get", get)
-    path = Path(__file__).resolve().parents[2] / "scripts/create_sandbox_payment.py"
+    path = Path(__file__).resolve().parents[2] / "scripts/1_create_sandbox_payment.py"
     return runpy.run_path(str(path))["main"], post, get
 
 

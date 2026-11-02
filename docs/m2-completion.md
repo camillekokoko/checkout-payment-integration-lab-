@@ -20,6 +20,14 @@ verified offline only. No capture or automatic retry was added.
 
 `Order reference → token-based create_payment → Payment record → payment lookup`
 
+The script now calls `authorize_order_payment(client, order, token)`. This service
+reads the supplied `Order` and enforces the merchant's AUD-only policy while
+choosing `capture=False`. The client validates currency format and forwards it;
+it does not enforce the merchant's supported-currency list. Its `create_payment()`
+requires an explicit keyword-only `capture` boolean, with no implicit default.
+Callers must obtain trusted order data and authorize access before invoking the
+service; the manual script constructs its fixed AUD 10.00 order locally.
+
 `payment_from_response()` associates the merchant order ID with the provider ID.
 Required response fields must contain nonblank strings; malformed responses stop
 conversion. They do not establish payment failure. Records live in memory and
@@ -83,6 +91,10 @@ No Payment Session endpoint or frontend component has been implemented in M2.
 | Immutability | `@dataclass(frozen=True)` | Blocks ordinary field reassignment; create a new record for an updated payment snapshot. |
 | Separation of concerns | Client, service functions, models | HTTP details, application decisions, and data structures have distinct responsibilities. |
 
+For example, `authorize_order_payment()` decides AUD and authorization only;
+`CheckoutClient.create_payment()` constructs and sends the corresponding request.
+Basic amount, currency-format and reference validation stays in the client.
+
 Dataclasses are a Python tool for expressing data, not a separate OOP principle.
 Type hints do not enforce runtime validation: `payment_from_response()` explicitly
 checks the required response fields. Neither a dataclass nor `frozen=True` saves
@@ -92,6 +104,61 @@ still be mutable; the current models contain strings and integers.
 Service logic can remain plain functions. No inheritance hierarchy is needed
 for the current design. An immutable `Payment` is a snapshot, not a live object
 that updates itself when the provider's status changes.
+
+## Layer responsibilities: what belongs where, and why
+
+| Layer | Responsibility in this project | Why separate it? |
+| --- | --- | --- |
+| Model | `Order`, `Payment`, and operation results describe data snapshots. | Give callers explicit data structures without coupling them to HTTP or storage. Dataclasses do not save or validate data automatically. |
+| Client | `CheckoutClient` builds provider URLs, headers and payloads, applies timeouts, and raises HTTP errors. It checks request formats and provider configuration. | Keep provider protocol details in one place and make them reusable across business workflows. |
+| Service | `authorize_order_payment()` selects AUD and `capture=False`; `capture_authorized_payment()` checks eligibility and balances, coordinates lookup/capture, and interprets request outcomes. | Keep merchant policy independent of HTTP details, and test decisions without real provider calls. |
+| Script | `1_create_sandbox_payment.py` loads configuration, constructs a fixed test order, invokes services, and displays selected results. | Provide a manual execution entry point without duplicating reusable business rules. It is not a web endpoint or persistence layer. |
+
+```mermaid
+flowchart LR
+    A[Manual script] -->|Order and token| B[Payment service]
+    B -->|Explicit currency and capture choice| C[CheckoutClient]
+    C -->|HTTP request| D[Checkout.com Sandbox]
+    D -->|HTTP response| C
+    C -->|Response or exception| B
+    B -->|Result or exception| A
+```
+
+Services and scripts use models to pass data. Models do not call clients, and
+clients do not call services. Future FastAPI routes will be additional entry
+points that can reuse the services after authenticating and authorizing users.
+
+### Validation has two purposes
+
+- **Request validity (client):** Is the payment ID safe to place in a URL? Is
+  currency a three-letter uppercase string? Is `capture` actually a boolean?
+  Are amount and reference valid inputs for the request?
+- **Business eligibility (service):** Does this merchant accept the currency?
+  Should payment creation authorize only? Is this payment eligible for a first
+  full capture, and does the requested amount match its available balance?
+
+For example, the client can construct a USD payment request, but this project's
+authorization service rejects a USD order before HTTP. Supporting a new merchant
+currency later changes business policy rather than provider request mechanics.
+Likewise, the client accepts an explicit capture choice while our authorization
+service always chooses `False`.
+
+The capture service also validates caller inputs before its GET. This deliberate
+overlap prevents unnecessary lookups and malformed URL construction; the client
+retains its own checks because it can be called independently. A few checks do
+not justify a shared validation framework yet.
+
+### How this affects tests and future changes
+
+Client tests verify exact requests and error propagation. Service tests verify
+policy, call order, blocked operations and uncertain outcomes. Script tests verify
+the manual flow with fake configuration and mocked HTTP. These tests do not prove
+concurrency safety, persistence, or live provider behavior.
+
+This separation adds small wrappers and some repeated checks, but makes policy
+changes easier to locate and business decisions easier to test. It does not
+require every function to become a class, an inheritance hierarchy, or additional
+layers before they solve a concrete problem.
 
 ## Remaining milestones
 

@@ -45,7 +45,10 @@ def main():
     # CheckoutClient loads .env at import without overriding existing environment values.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from app.clients.checkout_client import CheckoutClient
-    from app.services.payment_service import classify_payment_error, payment_from_response
+    from app.models.order import Order
+    from app.services.payment_service import (
+        authorize_order_payment, classify_payment_error, payment_from_response,
+    )
 
     print("Sandbox only: one AUD 10.00 payment request with capture=False.")
     print("Uses a fixed provider test card. No real card data is accepted.")
@@ -78,8 +81,8 @@ def main():
             raise ValueError
 
         stage = "payment creation"
-        payment_response = client.create_payment(
-            amount=1000, currency="AUD", token=payment_token, order_id=order_id
+        payment_response = authorize_order_payment(
+            client, Order(id=order_id, amount=1000, currency="AUD"), payment_token
         )
         print("Payment creation:")
         report_response(payment_response)

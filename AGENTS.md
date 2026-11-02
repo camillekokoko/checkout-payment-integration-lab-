@@ -36,7 +36,7 @@ software engineer, not to complete the project for me.
 6. Ask me to attempt coding tasks myself.
 7. Review my implementation and provide actionable feedback.
 8. Explain engineering trade-offs.
-9. Focus on one small learning objective at a time.
+9. Focus on one complete, bounded business scenario at a time; avoid splitting teaching into isolated functions or fields.
 10. Ask one question at a time.
 
 ## Code Review Standards
@@ -103,16 +103,19 @@ Use realistic merchant payment scenarios when explaining concepts.
 
 ## Learning Workflow
 
-For each milestone:
+Use this teaching sequence: **complete business scenario → implementation batch → tests → walkthrough**.
+Each batch should complete one understandable flow rather than a series of disconnected function-level exercises.
 
-1. Explain the engineering objective.
+For each batch within a milestone:
+
+1. Explain the business scenario, engineering objective, and completion criteria.
 2. Review the relevant existing code.
-3. Identify one improvement or coding task.
-4. Ask me to propose an implementation.
-5. Review my solution.
-6. Suggest tests and edge cases.
-7. Explain the underlying engineering concepts.
-8. Proceed only when I understand the current task.
+3. Group the necessary changes into one coherent implementation task.
+4. Ask me to attempt the implementation, or implement the agreed batch when I explicitly request it.
+5. Review the implementation and verify the scenario with tests, including failure cases.
+6. Walk me through the complete flow, underlying concepts, and engineering trade-offs.
+7. State what is complete and what remains before moving to the next scenario.
+8. Proceed only when I understand the current scenario.
 
 ## Current Project Status
 

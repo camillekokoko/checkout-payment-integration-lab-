@@ -1,8 +1,32 @@
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import httpx
 
 from app.models.payment import Payment
+from app.models.order import Order
+
+if TYPE_CHECKING:
+    from app.clients.checkout_client import CheckoutClient
+
+
+def authorize_order_payment(
+    client: "CheckoutClient", order: Order, token: str
+) -> httpx.Response:
+    """Apply the merchant's AUD, authorization-only policy to an order.
+
+    The caller must supply a trusted order, not browser-provided totals.
+    HTTP errors propagate without retrying; response mapping remains separate.
+    """
+    if order.currency != "AUD":
+        raise ValueError("currency must be AUD")
+    return client.create_payment(
+        amount=order.amount,
+        currency=order.currency,
+        token=token,
+        order_id=order.id,
+        capture=False,
+    )
 
 
 def payment_from_response(order_id: str, data: dict) -> Payment:
