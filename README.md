@@ -221,6 +221,47 @@ Provider endpoints and live/mock verification: [API Inventory](docs/api-inventor
 Lookup plus capture is not atomic and does not prevent concurrent or repeated
 requests; idempotency and durable operation tracking remain follow-up work.
 
+### M4 Planned — Idempotency, Safe Retries, and Timeout Reconciliation
+
+**Status: not started.** Business scenario: a merchant submits a payment request
+and receives a timeout. Determine what happened and whether another attempt is
+safe without creating a duplicate payment or financial operation.
+
+Work in complete scenario batches, using implementation → tests → walkthrough
+before moving to the next scenario.
+
+1. **Retry the same logical operation safely.**
+   - [ ] Verify Checkout.com's idempotency support, scope, retention and limitations
+     for each relevant endpoint before implementation.
+   - [ ] Define one stable idempotency key per logical operation; reuse it and the
+     same payload for retries, and use a new key for a new operation.
+   - [ ] Detect conflicting payloads for the same key, including changed amounts.
+2. **Reconcile an uncertain outcome.**
+   - [ ] Keep timeouts and ambiguous responses as `unknown`, not failed.
+   - [ ] Use read-only payment/action lookups when the relevant IDs are available.
+   - [ ] Define supported reconciliation paths when no provider ID was received;
+     retain unresolved outcomes when evidence is insufficient.
+   - [ ] Specify when to resume, wait, or require manual investigation.
+3. **Apply a bounded retry policy.**
+   - [ ] Separate GET retry rules from financial POST retry rules.
+   - [ ] Define handling for rate limits, transient failures and timeouts, including
+     applicable provider retry guidance.
+   - [ ] Add backoff, jitter, maximum attempts and an overall time limit.
+   - [ ] Retry a POST only with evidence that it is safe, preserving the original
+     idempotency key and payload.
+4. **Verify and document the operator workflow.**
+   - [ ] Mock a provider completing an operation while its response is lost.
+   - [ ] Test repeated requests, key/payload conflicts, 429/5xx responses, failed
+     lookups and exhausted retries without unintended duplicate writes.
+   - [ ] Make CLI outcomes and next steps explicit: lookup, wait or manual review.
+   - [ ] Update the walkthrough and cheat sheet with the verified behavior.
+
+Completion requires the agreed scenarios and failure cases to pass offline tests,
+with retry/reconciliation decisions explained in a walkthrough. PostgreSQL
+persistence remains M6 and verified webhooks remain M5. Document the limitations
+of in-memory operation tracking across process restarts; M4 alone does not
+establish durable crash recovery or concurrency safety.
+
 ## Planned Repository Structure
 
 ```text
