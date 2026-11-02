@@ -11,6 +11,13 @@ This list describes the repository's current integration, not every provider API
 | `GET /payments/{id}` | `get_payment(payment_id)` | Read payment status and capture balances | Secret | Mock tests and earlier user-run live Sandbox `200`, Authorized |
 | `POST /payments/{id}/captures` | `capture_payment(payment_id, amount, reference)` | Submit a capture action | Secret | Mock tests and user-run live Sandbox acceptance; action subsequently confirmed succeeded |
 | `GET /payments/{id}/actions` | `get_payment_actions(payment_id)` | Read action history and reconcile a specific capture | Secret | Mock tests and user-run live Sandbox confirmation: succeeded (2026-11-02) |
+| `POST /payments/{id}/voids` | `void_payment(payment_id, amount, reference)` | Release remaining uncaptured authorization | Secret | Mocks and user-run live request accepted; Void confirmation pending |
+| `POST /payments/{id}/refunds` | `refund_payment(payment_id, amount, reference)` | Return captured funds within refund availability | Secret | Mocks and user-run live request accepted; Refund confirmation pending |
+
+The capture endpoint also supports explicit `NonFinal` and `Final` choices. The
+partial-capture request now has user-run live acceptance evidence, with its
+specific action confirmation pending. Final-remaining capture is mock-verified
+only; the earlier first full capture is the live-confirmed scenario.
 
 API definitions: [Tokens reference](https://api-reference.checkout.com/tag/tokens)
 and [Payments reference](https://api-reference.checkout.com/tag/payments).
@@ -27,7 +34,8 @@ Payment Sessions; raw PAN/CVV must not reach the merchant backend.
 
 Manual commands in `backend/scripts/`: `1_create_sandbox_payment.py`,
 `2_get_sandbox_payment.py`, `3_capture_sandbox_payment.py`, and
-`4_confirm_sandbox_capture.py`. See the README for arguments. Capture confirmation
+`4_confirm_sandbox_capture.py`, plus `5_payment_operations.py` for partial capture,
+void, refund and generic confirmation. See the README for arguments. Capture confirmation
 is read-only; the capture command must not be rerun just to check its result.
 
 `pay_...` identifies a payment; `act_...` identifies an individual action.
@@ -40,8 +48,6 @@ automatically retries write requests or treats missing evidence as failure.
 
 ## Planned, not implemented
 
-- `POST /payments/{id}/voids`: release an uncaptured authorization.
-- `POST /payments/{id}/refunds`: request a refund after capture.
 - `POST /payment-sessions`: create the session for the planned Flow website.
 
 These endpoints are not counted as used or live-tested APIs. Provider permissions

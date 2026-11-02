@@ -48,6 +48,11 @@ def map_payment_status(provider_status: str) -> str:
         "Pending": "pending",
         "Authorized": "authorized",
         "Declined": "declined",
+        "Partially Captured": "partially_captured",
+        "Captured": "captured",
+        "Voided": "voided",
+        "Partially Refunded": "partially_refunded",
+        "Refunded": "refunded",
     }.get(provider_status, "unknown")
 
 

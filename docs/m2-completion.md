@@ -45,6 +45,10 @@ This is a snapshot mapping. It does not implement state transitions, fulfillment
 capture/refund handling, or out-of-order webhook processing. See the official
 [payment status explanation](https://support.checkout.com/hc/en-us/articles/37223151583506-Understanding-your-payment-statuses).
 
+The table records the initial M2 scope. M3 subsequently added captured, partially
+captured, voided, partially refunded and refunded snapshots; see
+[M3 Payment Lifecycle](m3-payment-lifecycle.md) for the current operation behavior.
+
 ## Application error decisions
 
 `classify_payment_error()` supplies fixed operator guidance without exposing

@@ -24,13 +24,15 @@ def test_payment_from_response_links_order_to_provider_result():
 
 @pytest.mark.parametrize("provider_status,local_status", [
     ("Authorized", "authorized"), ("Pending", "pending"), ("Declined", "declined"),
+    ("Partially Captured", "partially_captured"), ("Captured", "captured"),
+    ("Voided", "voided"), ("Partially Refunded", "partially_refunded"), ("Refunded", "refunded"),
 ])
 def test_map_payment_status(provider_status, local_status):
     # Authorization is recorded separately from capture.
     assert map_payment_status(provider_status) == local_status
 
 
-@pytest.mark.parametrize("provider_status", ["Captured", "FutureStatus", "", "authorized"])
+@pytest.mark.parametrize("provider_status", ["FutureStatus", "", "authorized"])
 def test_unmapped_status_remains_unknown(provider_status):
     # Unimplemented mappings must not imply payment failure or success.
     assert map_payment_status(provider_status) == "unknown"

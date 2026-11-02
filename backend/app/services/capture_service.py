@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING
 import httpx
 
 from app.models.capture import CaptureConfirmation, CaptureResult
+from app.models.payment_operation import PaymentOperationResult
+from app.services.payment_operation_service import confirm_payment_operation
 from app.services.payment_service import classify_payment_error
 
 if TYPE_CHECKING:
@@ -65,59 +67,14 @@ def capture_authorized_payment(
 
 
 def confirm_capture(client: "CheckoutClient", capture: CaptureResult) -> CaptureConfirmation:
-    """Read actions once and match the exact capture; never issue another POST.
-
-    Missing evidence is unknown, not a failed capture. Without an action ID,
-    leave reconciliation to a caller with additional provider evidence.
-    """
-    if not isinstance(capture.payment_id, str) or re.fullmatch(
-        r"pay_[A-Za-z0-9_]{26}", capture.payment_id
-    ) is None:
-        raise ValueError("payment_id is missing or invalid")
-    if type(capture.amount) is not int or not 0 < capture.amount <= 9999999999:
-        raise ValueError("capture amount is missing or invalid")
-
-    def unknown(reason: str) -> CaptureConfirmation:
-        return CaptureConfirmation(
-            capture.payment_id, capture.action_id, capture.amount, "unknown", reason
-        )
-
-    if capture.action_id is None:
-        return unknown("missing_action_id")
-    if not isinstance(capture.action_id, str) or re.fullmatch(
-        r"act_[A-Za-z0-9_]{26}", capture.action_id
-    ) is None:
-        raise ValueError("action_id is invalid")
-    try:
-        response = client.get_payment_actions(capture.payment_id)
-    except (httpx.HTTPStatusError, httpx.RequestError):
-        # A failed read says nothing about whether the prior capture succeeded.
-        return unknown("lookup_failed")
-    if response.status_code != 200:
-        return unknown("invalid_actions_response")
-    try:
-        actions = response.json()
-    except ValueError:
-        return unknown("invalid_actions_response")
-    if not isinstance(actions, list) or any(not isinstance(action, dict) for action in actions):
-        return unknown("invalid_actions_response")
-    matches = [action for action in actions if action.get("id") == capture.action_id]
-    if not matches:
-        return unknown("action_not_found")
-    if len(matches) != 1:
-        return unknown("duplicate_action_id")
-    action = matches[0]
-    if (
-        action.get("type") != "Capture"
-        or type(action.get("amount")) is not int
-        or action["amount"] != capture.amount
-    ):
-        return unknown("action_mismatch")
-    if type(action.get("approved")) is not bool:
-        return unknown("approval_unconfirmed")
+    """Reuse exact-action reconciliation while preserving the existing capture API."""
+    operation = PaymentOperationResult(
+        "Capture", capture.payment_id, capture.amount, capture.reference,
+        capture.status, capture.action_id, capture.error_kind,
+    )
+    result = confirm_payment_operation(client, operation)
     return CaptureConfirmation(
-        capture.payment_id, capture.action_id, capture.amount,
-        "succeeded" if action["approved"] else "failed",
+        result.payment_id, result.action_id, result.amount, result.status, result.reason
     )
 
 

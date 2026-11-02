@@ -159,7 +159,7 @@ Visual reference: [M2 Cheat Sheet (JPG)](docs/assets/m2-cheat-sheet.jpg).
 The script's records are not persisted. Safe retries/idempotency (M4), webhooks
 (M5), PostgreSQL (M6), and Flow UI/session endpoints (M7) remain unfinished.
 
-Latest verified offline test result: **310 passed** (client, model, service, and script tests). This does not verify live
+Latest verified offline test result: **440 passed** (client, model, service, and script tests). This does not verify live
 Sandbox authentication or payment processing.
 
 Layer responsibilities: `authorize_order_payment(client, order, token)` applies
@@ -191,9 +191,20 @@ The manual Sandbox script invokes the service and still sends `capture=False`.
 - [x] User-run live Sandbox action lookup confirmed the specific AUD 10.00
   capture succeeded (`Confirmation: succeeded`, `Reason: None`, 2026-11-02).
   This verifies the capture action, not settlement.
-- [ ] Implement and test void and refund operations and relevant state handling.
+- [x] Implement partial capture with explicit NonFinal, and final capture of the
+  entire remaining balance; validate provider capture availability before POST.
+- [x] Implement full void of remaining uncaptured authorization, and full/partial
+  refunds within current refundable availability, with matching action confirmation.
+- [x] Add mocked client/service/CLI tests and payment snapshot mappings for capture,
+  void, and refund states. Operator authentication and persistence remain future work.
+- [x] User-run live Sandbox void `1000` and refund `400` requests returned accepted
+  with action IDs (2026-11-02); acceptance is not final confirmation.
+- [ ] Confirm the live Void and Refund actions using read-only action lookup.
+- [x] User console log supplied live partial capture `500` acceptance and its action ID.
+- [ ] Confirm the live partial Capture action using read-only action lookup.
 
-Business scenario and walkthrough: [M3 Capture Flow](docs/m3-capture-flow.md).
+Business scenarios, walkthroughs, commands and Dashboard evidence:
+[M3 Payment Lifecycle](docs/m3-payment-lifecycle.md).
 Visual reference: [M3 Cheat Sheet](docs/assets/m3-cheat-sheet.jpg).
 Provider endpoints and live/mock verification: [API Inventory](docs/api-inventory.md).
 Lookup plus capture is not atomic and does not prevent concurrent or repeated
@@ -214,7 +225,8 @@ checkout-payment-integration-lab/
 │   │   ├── 1_create_sandbox_payment.py
 │   │   ├── 2_get_sandbox_payment.py
 │   │   ├── 3_capture_sandbox_payment.py
-│   │   └── 4_confirm_sandbox_capture.py
+│   │   ├── 4_confirm_sandbox_capture.py
+│   │   └── 5_payment_operations.py
 │   └── tests/
 │       ├── clients/
 │       ├── models/
@@ -318,6 +330,12 @@ Confirmation reads actions once. It never submits a capture or retries. Capture
 exit codes: `0` accepted, `1` blocked/rejected/error, `2` uncertain. Confirmation
 exit codes: `0` succeeded, `1` failed/invalid input/configuration, `2` unknown.
 Neither command persists results or establishes settlement.
+
+Partial capture, void, refund and generic action confirmation commands are grouped
+under `scripts/5_payment_operations.py`; see [M3 Payment Lifecycle](docs/m3-payment-lifecycle.md).
+Void and refund requests have user-run live acceptance evidence, with action
+confirmation pending. Partial capture also has user-run acceptance evidence;
+its exact-action confirmation is still pending.
 
 ### Offline Unit Tests
 

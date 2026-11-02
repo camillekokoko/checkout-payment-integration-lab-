@@ -152,12 +152,31 @@ class CheckoutClient:
         response.raise_for_status()
         return response
 
-    def capture_payment(self, payment_id: str, amount: int, reference: str):
+    def capture_payment(
+        self, payment_id: str, amount: int, reference: str, *, capture_type: str | None = None
+    ):
         """POST /payments/{id}/captures; 202 accepts a request, not completed capture.
 
         Eligibility and remaining balance checks belong to the capture service.
         Errors propagate without automatic retries.
         """
+        if capture_type is not None and capture_type not in ("Final", "NonFinal"):
+            raise ValueError("capture_type must be Final or NonFinal")
+        extra = {} if capture_type is None else {"capture_type": capture_type}
+        return self._post_payment_action(payment_id, amount, reference, "captures", extra)
+
+    def void_payment(self, payment_id: str, amount: int, reference: str):
+        """POST /payments/{id}/voids; acceptance is not final confirmation."""
+        return self._post_payment_action(payment_id, amount, reference, "voids")
+
+    def refund_payment(self, payment_id: str, amount: int, reference: str):
+        """POST /payments/{id}/refunds; acceptance is not final confirmation."""
+        return self._post_payment_action(payment_id, amount, reference, "refunds")
+
+    def _post_payment_action(
+        self, payment_id: str, amount: int, reference: str, endpoint: str, extra: dict | None = None
+    ):
+        # Shared protocol mechanics; each public method fixes its own endpoint.
         if not isinstance(payment_id, str) or re.fullmatch(
             r"pay_[A-Za-z0-9_]{26}", payment_id
         ) is None:
@@ -169,7 +188,7 @@ class CheckoutClient:
         if type(reference) is not str or not reference.strip() or len(reference) > 80:
             raise ValueError("reference must be a nonblank string of at most 80 characters")
 
-        url = f"{self.base_url.rstrip('/')}/payments/{payment_id}/captures"
+        url = f"{self.base_url}/payments/{payment_id}/{endpoint}"
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -178,7 +197,8 @@ class CheckoutClient:
 
         payload = {
             "amount": amount,
-            "reference": reference
+            "reference": reference,
+            **(extra or {}),
         }
 
         response = httpx.post(
