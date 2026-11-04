@@ -1,13 +1,51 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 import httpx
 
 from app.models.payment import Payment
 from app.models.order import Order
+from app.models.authorization_operation import AuthorizationOperation
 
 if TYPE_CHECKING:
     from app.clients.checkout_client import CheckoutClient
+
+
+def create_authorization_operation(order: Order, token: str) -> AuthorizationOperation:
+    """Start a new operation once; retain the returned snapshot across attempts."""
+    if order.currency != "AUD":
+        raise ValueError("currency must be AUD")
+    if type(order.amount) is not int or order.amount <= 0:
+        raise ValueError("amount must be a positive integer in minor units")
+    if not isinstance(order.id, str) or not order.id.strip() or len(order.id) > 80:
+        raise ValueError("order_id must be a nonblank string of at most 80 characters")
+    if not isinstance(token, str) or not token.strip():
+        raise ValueError("token must be a nonblank string")
+    return AuthorizationOperation(
+        idempotency_key=str(uuid4()), order_id=order.id,
+        amount=order.amount, currency=order.currency, token=token,
+    )
+
+
+def submit_authorization_operation(
+    client: "CheckoutClient", operation: AuthorizationOperation
+) -> httpx.Response:
+    """Submit once using the retained identity; errors propagate without retries.
+
+    Calling again requires a separate retry-policy decision; this function does
+    not establish provider key validity or persist operation state.
+    """
+    if operation.currency != "AUD":
+        raise ValueError("currency must be AUD")
+    return client.create_payment(
+        amount=operation.amount,
+        currency=operation.currency,
+        token=operation.token,
+        order_id=operation.order_id,
+        capture=False,
+        idempotency_key=operation.idempotency_key,
+    )
 
 
 def authorize_order_payment(
@@ -83,6 +121,14 @@ def classify_payment_error(
     if status == 403:
         return PaymentErrorDecision(
             "permission_error", "Check API key scopes and account permissions.", False
+        )
+    if status == 409:
+        # A duplicate payment request may still be processing. The status alone
+        # does not establish either a final outcome or the exact conflict cause.
+        return PaymentErrorDecision(
+            "request_conflict",
+            "Stop writes and reconcile the original operation; do not replace its idempotency key.",
+            True,
         )
     if status == 422:
         return PaymentErrorDecision(

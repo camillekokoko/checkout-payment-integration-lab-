@@ -3,6 +3,7 @@ import os
 import re
 import token
 from urllib.parse import urlsplit
+from uuid import UUID
 import httpx
 from dotenv import load_dotenv
 
@@ -80,9 +81,14 @@ class CheckoutClient:
         return response
 
     def create_payment(
-        self, amount: int, currency: str, token: str, order_id: str, *, capture: bool
+        self, amount: int, currency: str, token: str, order_id: str, *, capture: bool,
+        idempotency_key: str | None = None,
     ):
-        """Send a payment request; the caller chooses the capture strategy."""
+        """Send once, forwarding the caller's capture choice and optional stable key.
+
+        UUID4 keys are a local policy. Omitting a key retains the legacy flow
+        without idempotency protection; this client never creates keys or retries.
+        """
         if type(amount) is not int or amount <= 0:
             raise ValueError("amount must be a positive integer in minor units")
 
@@ -94,6 +100,14 @@ class CheckoutClient:
         if type(order_id) is not str or not order_id.strip() or len(order_id) > 80:
             raise ValueError("order_id must be a nonblank string of at most 80 characters")
 
+        if idempotency_key is not None:
+            try:
+                parsed_key = UUID(idempotency_key) if isinstance(idempotency_key, str) else None
+            except ValueError:
+                parsed_key = None
+            if parsed_key is None or parsed_key.version != 4 or str(parsed_key) != idempotency_key:
+                raise ValueError("idempotency_key must be a canonical UUID4 string")
+
         self.validate_payment_config()
         
         url = f"{self.base_url.rstrip('/')}/payments"
@@ -102,6 +116,8 @@ class CheckoutClient:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
+        if idempotency_key is not None:
+            headers["Cko-Idempotency-Key"] = idempotency_key
 
         payload = {
             "source": {

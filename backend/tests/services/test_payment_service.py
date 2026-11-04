@@ -76,6 +76,7 @@ def test_payment_from_response_rejects_non_object(data):
 @pytest.mark.parametrize("status,kind,unknown", [
     (401, "authentication_error", False),
     (403, "permission_error", False),
+    (409, "request_conflict", True),
     (422, "invalid_request", False),
     (429, "rate_limited", True),
     (408, "uncertain_outcome", True),

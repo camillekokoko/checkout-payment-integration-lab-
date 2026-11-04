@@ -166,7 +166,7 @@ def test_lookup_timeout_does_not_submit_capture(flow):
 
 @pytest.mark.parametrize("status,expected,kind", [
     (401, "rejected", "authentication_error"), (403, "rejected", "permission_error"),
-    (422, "rejected", "invalid_request"), (409, "unknown", "uncertain_outcome"),
+    (422, "rejected", "invalid_request"), (409, "unknown", "request_conflict"),
     (429, "unknown", "rate_limited"), (500, "unknown", "uncertain_outcome"),
     (502, "unknown", "uncertain_outcome"), (503, "unknown", "uncertain_outcome"),
     (504, "unknown", "uncertain_outcome"),
