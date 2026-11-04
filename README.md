@@ -47,6 +47,9 @@ The exact Checkout.com client SDK and session/tokenization flow depend on the ch
 
 ## Development Roadmap
 
+Project calendar, session journal and next-session checklist:
+[Project Tracker](docs/project-tracker.md).
+
 ### Phase 1: Python Backend & Provider Integration
 - [x] M1: Sandbox configuration, credentials validation, and HTTPX client
 - [x] M2: Sandbox payment creation/lookup, validation, in-memory records, and error decisions
