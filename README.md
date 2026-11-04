@@ -159,7 +159,7 @@ Visual reference: [M2 Cheat Sheet (JPG)](docs/assets/m2-cheat-sheet.jpg).
 The script's records are not persisted. Safe retries/idempotency (M4), webhooks
 (M5), PostgreSQL (M6), and Flow UI/session endpoints (M7) remain unfinished.
 
-Latest verified offline test result: **440 passed** (client, model, service, and script tests). This does not verify live
+Latest verified offline test result: **474 passed** (2026-11-04; client, model, service, and script tests). This does not verify live
 Sandbox authentication or payment processing.
 
 Layer responsibilities: `authorize_order_payment(client, order, token)` applies
@@ -221,9 +221,12 @@ Provider endpoints and live/mock verification: [API Inventory](docs/api-inventor
 Lookup plus capture is not atomic and does not prevent concurrent or repeated
 requests; idempotency and durable operation tracking remain follow-up work.
 
-### M4 Planned — Idempotency, Safe Retries, and Timeout Reconciliation
+### M4 In Progress — Idempotency, Safe Retries, and Timeout Reconciliation
 
-**Status: not started.** Business scenario: a merchant submits a payment request
+**Status: in progress (2026-11-04).** The authorization operation identity,
+idempotency header support, and conflict/replay handling are implemented and
+mock-tested. Automated safe retries and reconciliation execution remain unfinished.
+Business scenario: a merchant submits a payment request
 and receives a timeout. Determine what happened and whether another attempt is
 safe without creating a duplicate payment or financial operation.
 
@@ -231,13 +234,28 @@ Work in complete scenario batches, using implementation → tests → walkthroug
 before moving to the next scenario.
 
 1. **Retry the same logical operation safely.**
+   - [x] Add immutable `AuthorizationOperation` with key, order ID, amount,
+     currency and token; exclude the token from `repr` (not from serialization).
+   - [x] Add `create_authorization_operation()` to generate a UUID4 once, and
+     `submit_authorization_operation()` to forward the retained snapshot with
+     `capture=False`, without automatic retries.
+   - [x] Add optional `idempotency_key` support to `CheckoutClient.create_payment()`:
+     validate canonical UUID4 format as a local policy and send `Cko-Idempotency-Key`.
    - [ ] Verify Checkout.com's idempotency support, scope, retention and limitations
-     for each relevant endpoint before implementation.
-   - [ ] Define one stable idempotency key per logical operation; reuse it and the
-     same payload for retries, and use a new key for a new operation.
-   - [ ] Detect conflicting payloads for the same key, including changed amounts.
+     for each relevant endpoint before enabling retries. Payment header support
+     is confirmed; current key retention remains unverified.
+   - [x] Preserve the same key and operation inputs across explicit submission
+     attempts; generate a distinct key when creating a new operation.
+   - [x] Detect conflicting requests for the same key within a retained in-memory
+     tracker, using a fingerprint of method, URL and the complete payload. Retain
+     bindings after errors and reject changes before HTTP.
 2. **Reconcile an uncertain outcome.**
-   - [ ] Keep timeouts and ambiguous responses as `unknown`, not failed.
+   - [x] Keep timeout/ambiguous error decisions uncertain; classify HTTP `409` as
+     `request_conflict` with `outcome_unknown=True` and guidance to stop writes,
+     reconcile the original operation and avoid replacing its key. The status
+     alone does not establish the exact conflict cause.
+   - [x] Test replayed `202` responses preserve the original payment ID and map
+     the response body's status rather than treating HTTP acceptance as success.
    - [ ] Use read-only payment/action lookups when the relevant IDs are available.
    - [ ] Define supported reconciliation paths when no provider ID was received;
      retain unresolved outcomes when evidence is insufficient.
@@ -250,11 +268,37 @@ before moving to the next scenario.
    - [ ] Retry a POST only with evidence that it is safe, preserving the original
      idempotency key and payload.
 4. **Verify and document the operator workflow.**
-   - [ ] Mock a provider completing an operation while its response is lost.
+   - [x] Mock a provider completing an operation while its response is lost;
+     verify the same key and HTTP payload on a separately initiated submission.
+   - [x] Test timeout followed by `409`, replayed `202` statuses, distinct keys
+     for new operations, and invalid keys blocked before HTTP.
+   - [x] Test changed amounts, tokens, references, currency, capture choice,
+     processing channels and URLs, plus tracker sharing across Clients.
    - [ ] Test repeated requests, key/payload conflicts, 429/5xx responses, failed
      lookups and exhausted retries without unintended duplicate writes.
    - [ ] Make CLI outcomes and next steps explicit: lookup, wait or manual review.
    - [ ] Update the walkthrough and cheat sheet with the verified behavior.
+
+Current flow: caller retains the snapshot returned by
+`create_authorization_operation(order, token)`, then passes it to
+`submit_authorization_operation(client, operation)`. Submission errors propagate
+for the caller to classify; no retry loop, waiting or lookup is triggered.
+Tests simulate later attempts and provider replay behavior, not permission to
+retry live requests without a verified policy.
+
+The existing `authorize_order_payment()` and manual payment-creation CLI still use
+the legacy path without an idempotency key. Capture, void and refund have not yet
+received this key support. An immutable snapshot does not detect separately
+constructed conflicting operations, deduplicate a new key for the same order,
+or freeze client configuration such as the processing channel. The Client's tracker
+now detects inconsistent requests for retained keys, including channel changes.
+Each Client has a tracker by default; sharing one across Clients must be explicit.
+Bindings are not automatically evicted and do not survive a new tracker or process
+restart. Account scope, durable operation tracking and provider retention checks
+remain follow-up work.
+
+Current walkthrough: [M4 Key Learnings](docs/m4-key-learnings.md).
+Visual reference: [M4 Cheat Sheet](docs/assets/m4-cheat-sheet.jpg).
 
 Completion requires the agreed scenarios and failure cases to pass offline tests,
 with retry/reconciliation decisions explained in a walkthrough. PostgreSQL

@@ -7,10 +7,12 @@ from uuid import UUID
 import httpx
 from dotenv import load_dotenv
 
+from app.clients.idempotency_tracker import InMemoryIdempotencyTracker
+
 load_dotenv()
 
 class CheckoutClient:
-    def __init__(self):
+    def __init__(self, *, idempotency_tracker: InMemoryIdempotencyTracker | None = None):
         self.api_key = os.getenv("CHECKOUT_SECRET_KEY")
         self.base_url = os.getenv("CHECKOUT_BASE_URL")
         self.processing_channel_id = os.getenv("CHECKOUT_PROCESSING_CHANNEL_ID")
@@ -44,6 +46,10 @@ class CheckoutClient:
             raise ValueError("CHECKOUT_BASE_URL must be a Sandbox HTTPS base URL")
 
         self.base_url = self.base_url.rstrip("/")
+        self._idempotency_tracker = (
+            idempotency_tracker if idempotency_tracker is not None
+            else InMemoryIdempotencyTracker()
+        )
         
         
     def validate_token_config(self):
@@ -130,6 +136,13 @@ class CheckoutClient:
             "reference": order_id,
             "processing_channel_id": self.processing_channel_id,
         }
+
+        if idempotency_key is not None:
+            # Bind before POST and retain after timeout/HTTP failure. A matching
+            # fingerprint establishes consistency, not permission to retry.
+            self._idempotency_tracker.bind(
+                idempotency_key, method="POST", url=url, payload=payload,
+            )
 
         response = httpx.post(
             url,
