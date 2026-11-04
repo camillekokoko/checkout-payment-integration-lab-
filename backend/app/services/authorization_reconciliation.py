@@ -2,10 +2,9 @@ from dataclasses import dataclass
 import re
 from typing import TYPE_CHECKING
 
-import httpx
-
 from app.models.order import Order
 from app.services.payment_service import map_payment_status
+from app.services.reconciliation_retry import LookupRetryPolicy, LookupStopped, lookup_payment
 
 if TYPE_CHECKING:
     from app.clients.checkout_client import CheckoutClient
@@ -23,8 +22,9 @@ class AuthorizationReconciliation:
 
 def reconcile_authorization(
     client: "CheckoutClient | None", order: Order, *, payment_id: str | None = None,
+    retry_policy: LookupRetryPolicy | None = None,
 ) -> AuthorizationReconciliation:
-    """Read a known payment once after uncertainty; never retry or submit writes.
+    """Read a known payment after uncertainty; optional retries apply only to GET.
 
     No token or idempotency key is needed for a read. The caller supplies trusted
     order data and a payment ID associated with the original operation, not an
@@ -51,12 +51,10 @@ def reconcile_authorization(
     if client is None:
         raise ValueError("client is required for a payment lookup")
     try:
-        response = client.get_payment(payment_id)
-    except httpx.HTTPStatusError:
+        response = lookup_payment(client, payment_id, retry_policy or LookupRetryPolicy())
+    except LookupStopped as error:
         # Even a 404 is a failed lookup, not evidence the original POST failed.
-        return unresolved("lookup_http_error")
-    except httpx.RequestError:
-        return unresolved("lookup_transport_error")
+        return unresolved(str(error))
     if response.status_code != 200:
         return unresolved("unexpected_lookup_status")
     try:

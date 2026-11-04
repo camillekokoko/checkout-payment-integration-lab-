@@ -64,12 +64,12 @@ class CheckoutClient:
         ) is None:
             raise ValueError("CHECKOUT_PROCESSING_CHANNEL_ID is missing or invalid")
 
-    def get_payment(self, payment_id: str):
+    def get_payment(self, payment_id: str, *, timeout: float = 10.0):
         url = f"{self.base_url}/payments/{payment_id}"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
         }
-        response = httpx.get(url, headers=headers, timeout=10.0)
+        response = httpx.get(url, headers=headers, timeout=timeout)
         
         response.raise_for_status()
         return response

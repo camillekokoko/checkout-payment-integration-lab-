@@ -97,3 +97,29 @@ def test_mismatched_payment_is_not_accepted(script, capsys, changes):
     assert main(ARGS + ["--payment-id", PAYMENT_ID]) == 2
     get.assert_called_once()
     assert "payment_mismatch" in capsys.readouterr().out
+
+
+def test_cli_opt_in_retries_get_then_reports_success(script, monkeypatch, capsys):
+    main, get = script
+    now = [0.0]
+    sleeps = []
+
+    def sleep(delay):
+        sleeps.append(delay)
+        now[0] += delay
+
+    monkeypatch.setattr("app.services.reconciliation_retry.time.monotonic", lambda: now[0])
+    monkeypatch.setattr("app.services.reconciliation_retry.time.sleep", sleep)
+    monkeypatch.setattr("app.services.reconciliation_retry.random.uniform", lambda a, b: 0.1)
+    get.side_effect = [httpx.ReadTimeout("private-error"), response()]
+    assert main(ARGS + ["--payment-id", PAYMENT_ID, "--max-attempts", "3", "--retry-budget", "20"]) == 0
+    assert get.call_count == 2
+    assert sleeps == [1.1]
+    assert "Maximum GET attempts: 3" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("budget", ["0", "nan", "inf", "61"])
+def test_invalid_retry_budget_sends_no_http(script, budget):
+    main, get = script
+    assert main(ARGS + ["--payment-id", PAYMENT_ID, "--retry-budget", budget]) == 1
+    get.assert_not_called()
