@@ -4,8 +4,9 @@
 
 **In progress — 2026-11-04.** Authorization operation identity, payment idempotency
 headers, local request consistency checks and uncertain-outcome guidance are
-implemented with mocked tests. Safe automatic retries and reconciliation execution
-are not complete. The project offline suite currently has **474 passing tests**;
+implemented with mocked tests. Read-only reconciliation service/CLI and opt-in
+bounded GET retries are also implemented. Financial POST retry policy remains
+unfinished. The project offline suite currently has **556 passing tests**;
 this is not live verification of provider idempotency or retention.
 
 ## Business scenario: an authorization response is lost
@@ -24,12 +25,15 @@ to retry: provider retention, timing and the original outcome still matter.
 
 | Component | Responsibility in the current implementation |
 | --- | --- |
-| Caller | Retain the operation object across attempts and decide next steps; no automatic retry policy exists yet. |
+| Caller | Retain the operation object across attempts and decide next steps; no automatic POST retry policy exists yet. |
 | `create_authorization_operation()` | Validate trusted order inputs and token presence, generate one UUID4, and return an input snapshot. |
 | `AuthorizationOperation` | Immutable key, order ID, amount, currency and token for one authorization operation. |
 | `submit_authorization_operation()` | Forward the snapshot with `capture=False`; propagate errors without retries. |
 | `CheckoutClient.create_payment()` | Validate the optional key, build the request, bind its fingerprint, send once and raise HTTP errors. |
 | `InMemoryIdempotencyTracker` | Retain the first request fingerprint for a key and reject inconsistent reuse before HTTP. |
+| `reconcile_authorization()` | Compare a known payment snapshot with trusted Order values and return status/reason/next action. |
+| `lookup_payment()` / `LookupRetryPolicy` | Retry only eligible reconciliation GET failures within attempt and scheduling limits. |
+| `6_reconcile_authorization.py` | Accept operator inputs, configure optional GET retries and display reconciliation results. |
 
 All requests pass through the Client, but only the caller/service knows whether
 the business intends a new payment or another attempt at the original operation.
@@ -134,8 +138,126 @@ exact cause. It never marks the payment failed just because of a conflict.
 
 The [Payments API reference](https://api-reference.checkout.com/tag/payments)
 documents `Cko-Idempotency-Key`. Canonical UUID4 validation is our local policy,
-not a claim that the provider accepts only that format. Current provider key
-retention has not been verified, and no expiry duration is hard-coded.
+not a claim that the provider accepts only that format. Subsequent research of the
+current official guide confirmed default 72-hour retention in both environments,
+with configurable production settings. No expiry duration is hard-coded in our
+implementation. See the [POST retry decision table](m4-post-retry-policy.md) for
+verified evidence, caching/minimum-wait rules and remaining scope/source questions.
+
+## Follow up an unknown authorization using `6_`
+
+Reconciliation means gathering evidence about the original payment. It is a
+read-only follow-up, not another authorization, capture or payment retry.
+Use it when the original outcome is uncertain and a reliable source provides
+the payment ID associated with that original request.
+
+```mermaid
+flowchart TD
+    A[Original authorization outcome unknown] --> B{Known original payment ID?}
+    B -->|No| C[Unknown: manual investigation, no HTTP]
+    B -->|Yes| D[GET payment with optional bounded retry]
+    D -->|Lookup failure or malformed response| C
+    D --> E{ID, reference, amount, currency match?}
+    E -->|No| C
+    E -->|Yes| F[Map response body status]
+    F -->|Pending| G[Wait for further evidence, no polling]
+    F -->|Unrecognized| C
+    F -->|Known non-Pending status| H[Observed snapshot for next business decision]
+```
+
+The service takes `Order`, not the token-bearing `AuthorizationOperation`:
+
+```python
+reconcile_authorization(client, order, payment_id=known_payment_id)
+```
+
+It verifies the response ID, order reference, integer amount and currency before
+mapping status. The caller supplies trusted original order values, not values
+copied from whichever payment happens to be returned. Matching fields catch
+mismatches but cannot prove an idempotency-key association; a reference is not
+a unique payment identity.
+
+No token or idempotency key input is needed. A known-ID lookup still requires
+Sandbox credentials for API authentication. With no ID, the CLI skips Client
+construction, needs no credentials and sends no HTTP. It returns unknown with
+manual-investigation guidance; it does not search by reference.
+
+From `backend/`, with the virtual environment activated (each command is one line):
+
+```bash
+python scripts/6_reconcile_authorization.py --order-id ORIGINAL_ORDER_REFERENCE --amount 1000 --currency AUD --payment-id pay_REPLACE_WITH_PAYMENT_ID
+```
+
+Omit `--payment-id` to receive no-ID guidance. Output contains observed status,
+payment ID, reason and next action, rather than raw provider bodies or credentials.
+
+| CLI exit code | Meaning |
+| --- | --- |
+| `0` | A recognized non-Pending snapshot, including Declined. Not payment success or fulfillment permission. |
+| `1` | Input validation, retry-policy validation or Sandbox configuration failed. |
+| `2` | Pending or unknown. Argument-parser errors also exit `2` before HTTP. |
+
+An observed Declined resolves uncertainty about that snapshot; it does not close
+an order in a database or decide whether the customer should start a new payment.
+Authorized does not mean captured, and no snapshot proves settlement. A failed
+GET, including 404, does not prove the original authorization failed. The service
+returns an in-memory result without persisting a payment or updating an order.
+
+Implementation: [reconciliation service](../backend/app/services/authorization_reconciliation.py)
+and [CLI](../backend/scripts/6_reconcile_authorization.py).
+
+## Recover transient GET failures with bounded retries
+
+By default, reconciliation makes one GET attempt. Explicitly opt into retries:
+
+```bash
+python scripts/6_reconcile_authorization.py --order-id ORIGINAL_ORDER_REFERENCE --amount 1000 --currency AUD --payment-id pay_REPLACE_WITH_PAYMENT_ID --max-attempts 3 --retry-budget 20
+```
+
+`3` includes the first request, not three retries after it. The local policy
+allows 1–5 total attempts and a finite scheduling budget greater than zero and
+at most 60 seconds (default 20). These are application choices, not provider limits.
+
+| GET result | Policy |
+| --- | --- |
+| HTTPX timeout or network error | May retry if attempts and budget remain. |
+| HTTP 429/502/503/504 | May retry after the required delay. |
+| Other HTTP errors, including 401/403/404/409/500 | Stop and retain unknown. |
+| Other request errors, such as protocol/redirect errors | Stop; not assumed transient. |
+| Valid Pending response | Return pending immediately; do not poll. |
+| Malformed response, mismatched payment or unrecognized status | Stop with unknown; do not fetch repeatedly to seek a better answer. |
+
+For each eligible failure, the wait is:
+
+```text
+delay = max(exponential backoff, Retry-After) + jitter
+backoff = 1, 2, 4, ... seconds
+jitter = 0 to 0.25 seconds
+```
+
+Backoff reduces request pressure; jitter reduces synchronized retries by multiple
+callers. Valid `Retry-After` seconds or HTTP dates supply a minimum wait. Missing
+or invalid values fall back to backoff. A past date contributes zero. If the
+delay cannot fit the remaining budget, stop instead of shortening the server's
+requested wait.
+
+The deadline uses `time.monotonic()` so wall-clock changes do not reset the
+scheduling budget. HTTP-date parsing separately uses current UTC time. Both
+request duration and waits consume the budget. Before each GET, its HTTPX timeout
+is reduced to `min(10 seconds, remaining budget)`.
+
+**This is not a hard wall-time deadline.** HTTPX timeouts apply to individual
+network phases, and this synchronous implementation cannot forcibly cancel an
+active request. A request already in progress may outlast the scheduling budget;
+the budget prevents starting another attempt after expiry.
+
+Exhausted retry attempts return unknown with `lookup_retries_exhausted`; exhausted
+budget returns `lookup_retry_budget_exhausted`. A single-attempt failure keeps
+the normal lookup error reason. None of these paths submits a financial POST or
+rotates an idempotency key. The retry helper only calls `client.get_payment()`;
+the general Client and other scripts do not acquire automatic retries.
+
+Implementation: [GET retry policy](../backend/app/services/reconciliation_retry.py).
 
 ## Offline verification
 
@@ -151,6 +273,15 @@ Tests exercise the full service → actual Client → mocked HTTP path:
 - Timeout followed by `409` remains uncertain, with no automatic third request.
 - Replayed `202` preserves the payment ID and respects all tested body statuses.
 - Invalid keys are rejected before HTTP; legacy calls do not generate keys.
+- No-ID reconciliation sends no HTTP; mismatches, malformed responses, failed
+  lookups and unknown statuses do not become success.
+- CLI tests cover known status, Pending/unknown, input/configuration failures,
+  sensitive-output suppression, and absence of POSTs.
+- GET timeout/network errors and eligible HTTP failures recover within limits;
+  non-retryable errors and valid Pending responses stop immediately.
+- Retry-After, elapsed request time, remaining per-phase timeout, attempt/budget
+  exhaustion and CLI opt-in retries are verified with fake clocks/sleeps.
+  No retry test actually sleeps or calls Checkout.com.
 
 From `backend/`, with the virtual environment activated:
 
@@ -160,9 +291,12 @@ PYTHON_DOTENV_DISABLED=1 python -m pytest tests/clients tests/models tests/servi
 
 ## What remains before M4 completion
 
-- Verify provider retention and endpoint-specific retry rules.
-- Define bounded retries, backoff, jitter, attempt limits and deadlines.
-- Execute reconciliation with available IDs and define unresolved/no-ID handling.
+- Confirm effective account-specific retention/scope and remaining endpoint/source
+  retry rules; default retention research is recorded in the POST policy document.
+- Define financial POST retry eligibility and a bounded write retry policy after
+  verifying provider rules. The implemented GET policy does not authorize POSTs.
+- Automated no-ID recovery remains unimplemented; current behavior is explicitly
+  unresolved with manual guidance. Verified webhooks follow in M5.
 - Integrate the retained operation workflow into the CLI; existing
   `authorize_order_payment()` and the payment-creation CLI still omit the key.
 - Extend key support to capture, void and refund with their own business rules.

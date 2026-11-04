@@ -104,7 +104,8 @@ validation here means local format checks, not verification of live Sandbox keys
 - [x] M2: Add application-level operator decisions for authentication and permission errors.
 - [ ] M6: Persist merchant order/payment associations in PostgreSQL.
 - [ ] M4: Handle rate limits, safe retries, and uncertain payment outcomes.
-  The client currently propagates errors without automatically retrying.
+  Reconciliation GETs now support opt-in bounded retries; financial POSTs still
+  propagate errors without automatic retries.
 
 > **Tokenization — learning use only:** Token creation requires a Public Key,
 > and direct requests with `type: "card"` are for testing only. The Python
@@ -159,7 +160,7 @@ Visual reference: [M2 Cheat Sheet (JPG)](docs/assets/m2-cheat-sheet.jpg).
 The script's records are not persisted. Safe retries/idempotency (M4), webhooks
 (M5), PostgreSQL (M6), and Flow UI/session endpoints (M7) remain unfinished.
 
-Latest verified offline test result: **474 passed** (2026-11-04; client, model, service, and script tests). This does not verify live
+Latest verified offline test result: **556 passed** (2026-11-04; client, model, service, and script tests). This does not verify live
 Sandbox authentication or payment processing.
 
 Layer responsibilities: `authorize_order_payment(client, order, token)` applies
@@ -224,8 +225,10 @@ requests; idempotency and durable operation tracking remain follow-up work.
 ### M4 In Progress — Idempotency, Safe Retries, and Timeout Reconciliation
 
 **Status: in progress (2026-11-04).** The authorization operation identity,
-idempotency header support, and conflict/replay handling are implemented and
-mock-tested. Automated safe retries and reconciliation execution remain unfinished.
+idempotency header support, conflict/replay handling, read-only reconciliation
+service/CLI and opt-in bounded reconciliation GET retries are implemented and
+mock-tested. Default provider retention and concurrency behavior are now documented;
+financial POST retry implementation and remaining eligibility/scope checks are unfinished.
 Business scenario: a merchant submits a payment request
 and receives a timeout. Determine what happened and whether another attempt is
 safe without creating a duplicate payment or financial operation.
@@ -243,7 +246,8 @@ before moving to the next scenario.
      validate canonical UUID4 format as a local policy and send `Cko-Idempotency-Key`.
    - [ ] Verify Checkout.com's idempotency support, scope, retention and limitations
      for each relevant endpoint before enabling retries. Payment header support
-     is confirmed; current key retention remains unverified.
+     and default 72-hour Sandbox/production retention are confirmed. Account-specific
+     scope/settings, source eligibility and detailed POST error rules remain open.
    - [x] Preserve the same key and operation inputs across explicit submission
      attempts; generate a distinct key when creating a new operation.
    - [x] Detect conflicting requests for the same key within a retained in-memory
@@ -256,15 +260,26 @@ before moving to the next scenario.
      alone does not establish the exact conflict cause.
    - [x] Test replayed `202` responses preserve the original payment ID and map
      the response body's status rather than treating HTTP acceptance as success.
-   - [ ] Use read-only payment/action lookups when the relevant IDs are available.
-   - [ ] Define supported reconciliation paths when no provider ID was received;
-     retain unresolved outcomes when evidence is insufficient.
-   - [ ] Specify when to resume, wait, or require manual investigation.
+   - [x] Add read-only payment reconciliation for a known payment ID; validate
+     ID, original reference, integer amount and currency before adopting its status.
+     Exact-action confirmation remains available through the M3 commands.
+   - [x] Keep no-ID outcomes unresolved and provide manual-investigation guidance
+     without a request; automated no-ID recovery is not implemented.
+   - [x] Return observed status and operator guidance: wait for Pending, investigate
+     unknown/mismatched evidence, and use known snapshots for the next business
+     decision. No result automatically authorizes another write or fulfillment.
 3. **Apply a bounded retry policy.**
-   - [ ] Separate GET retry rules from financial POST retry rules.
-   - [ ] Define handling for rate limits, transient failures and timeouts, including
-     applicable provider retry guidance.
-   - [ ] Add backoff, jitter, maximum attempts and an overall time limit.
+   - [x] Separate reconciliation GET retry rules from financial POSTs; default to
+     one GET attempt, with opt-in retries for timeout/network errors and HTTP
+     429/502/503/504. Other HTTP errors and received payment evidence stop retries.
+   - [x] Add exponential backoff, jitter, Retry-After seconds/date handling, up to
+     five total attempts and a monotonic scheduling budget of up to 60 seconds.
+     Reduce per-phase request timeouts to the remaining budget. The budget does
+     not forcibly cancel an active synchronous request or guarantee a hard wall-time limit.
+   - [x] Research and document default provider retention, caching, concurrency
+     and minimum wait in a POST retry decision table; automatic POST retries remain disabled.
+   - [ ] Resolve financial POST source/error eligibility, account-specific scope/settings
+     and rate-limit/transient-error rules before enabling write retries.
    - [ ] Retry a POST only with evidence that it is safe, preserving the original
      idempotency key and payload.
 4. **Verify and document the operator workflow.**
@@ -274,10 +289,13 @@ before moving to the next scenario.
      for new operations, and invalid keys blocked before HTTP.
    - [x] Test changed amounts, tokens, references, currency, capture choice,
      processing channels and URLs, plus tracker sharing across Clients.
-   - [ ] Test repeated requests, key/payload conflicts, 429/5xx responses, failed
-     lookups and exhausted retries without unintended duplicate writes.
-   - [ ] Make CLI outcomes and next steps explicit: lookup, wait or manual review.
-   - [ ] Update the walkthrough and cheat sheet with the verified behavior.
+   - [x] Test request conflicts, transient GET failures, Retry-After, no-ID handling,
+     mismatched evidence, exhausted attempts/budgets and zero POSTs. Retry tests
+     use fake time and do not actually sleep or contact the provider.
+   - [x] Add `6_reconcile_authorization.py` with explicit snapshot, reason, next
+     action and exit codes; require no token or idempotency key for reconciliation.
+   - [x] Refresh the learning walkthrough and cheat sheet with reconciliation
+     service/CLI, exit-code semantics and bounded GET retry behavior and limits.
 
 Current flow: caller retains the snapshot returned by
 `create_authorization_operation(order, token)`, then passes it to
@@ -285,6 +303,13 @@ Current flow: caller retains the snapshot returned by
 for the caller to classify; no retry loop, waiting or lookup is triggered.
 Tests simulate later attempts and provider replay behavior, not permission to
 retry live requests without a verified policy.
+
+For follow-up reads, `reconcile_authorization(client, order, payment_id=...)`
+accepts trusted original Order values rather than the token-bearing operation.
+The caller must supply the ID associated with the original request: matching
+reference/amount/currency alone cannot prove an idempotency-key association.
+The service returns a snapshot without persisting it. Lookup failure, including
+404, does not establish that the original payment failed.
 
 The existing `authorize_order_payment()` and manual payment-creation CLI still use
 the legacy path without an idempotency key. Capture, void and refund have not yet
@@ -294,8 +319,11 @@ or freeze client configuration such as the processing channel. The Client's trac
 now detects inconsistent requests for retained keys, including channel changes.
 Each Client has a tracker by default; sharing one across Clients must be explicit.
 Bindings are not automatically evicted and do not survive a new tracker or process
-restart. Account scope, durable operation tracking and provider retention checks
-remain follow-up work.
+restart. Account scope, durable operation tracking and effective account-specific
+retention checks remain follow-up work.
+
+Provider research and current local decisions:
+[M4 Authorization POST Retry Policy](docs/m4-post-retry-policy.md).
 
 Current walkthrough: [M4 Key Learnings](docs/m4-key-learnings.md).
 Visual reference: [M4 Cheat Sheet](docs/assets/m4-cheat-sheet.jpg).
@@ -322,7 +350,8 @@ checkout-payment-integration-lab/
 │   │   ├── 2_get_sandbox_payment.py
 │   │   ├── 3_capture_sandbox_payment.py
 │   │   ├── 4_confirm_sandbox_capture.py
-│   │   └── 5_payment_operations.py
+│   │   ├── 5_payment_operations.py
+│   │   └── 6_reconcile_authorization.py
 │   └── tests/
 │       ├── clients/
 │       ├── models/
@@ -403,6 +432,33 @@ From the project root, replace the ID below with an existing Sandbox payment ID:
 This script sends one GET and prints only the payment ID, status, currency and
 selected balances. It does not create payments, submit captures, or retry.
 Missing or invalid balances are reported as an unexpected response, not zero.
+
+### Authorization Reconciliation After an Uncertain Outcome (Opt-in)
+
+From `backend/`, with the virtual environment activated, supply trusted original
+order values and the known payment ID. Each command is kept on one line:
+
+```bash
+python scripts/6_reconcile_authorization.py --order-id ORIGINAL_ORDER_REFERENCE --amount 1000 --currency AUD --payment-id pay_REPLACE_WITH_PAYMENT_ID
+```
+
+This performs one GET by default. To opt into up to three total GET attempts with
+a 20-second scheduling budget:
+
+```bash
+python scripts/6_reconcile_authorization.py --order-id ORIGINAL_ORDER_REFERENCE --amount 1000 --currency AUD --payment-id pay_REPLACE_WITH_PAYMENT_ID --max-attempts 3 --retry-budget 20
+```
+
+Omit `--payment-id` if none is available: the command reports unknown and manual
+investigation guidance without HTTP or requiring credentials. No token or
+idempotency key argument is needed. With an ID, Sandbox credentials are required.
+
+The CLI reports observed status, payment ID, reason and next action. Exit `0`
+means a recognized non-Pending snapshot (including Declined), not payment success;
+`1` means invalid input/configuration and `2` means Pending/unknown. Argument-parser
+errors also exit `2` before HTTP. Pending is not polled. Retries only recover
+eligible GET failures; no path creates, captures, voids or refunds a payment.
+The scheduling budget stops new attempts, not an already active synchronous GET.
 
 ### Manual Sandbox Capture and Confirmation (Opt-in)
 
